@@ -1,0 +1,324 @@
+<!-- Tempel seluruh isi file ini di Blogger: New Post → ikon pensil → HTML view -->
+<div style="font-family:Segoe UI,Arial,sans-serif;line-height:1.7;color:#222;">
+
+<h1>Tugas 1 PBKK — Instalasi .NET &amp; Sistem Data Mahasiswa (C# Console)</h1>
+
+<p>📂 Source code lengkap: <a href="https://github.com/miaikoo/2026-framework-based-programming/tree/main/1-Instalasi-DotNet-DataMahasiswa" target="_blank">github.com/miaikoo/2026-framework-based-programming</a></p>
+
+<p>Halaman ini berisi panduan <b>step-by-step</b> menyiapkan lingkungan pengembangan .NET dari nol hingga berhasil menjalankan program <b>Sistem Data Mahasiswa</b> berbasis console application C#. Selesaikan setiap langkah secara berurutan.</p>
+
+<h2>1. Instal .NET SDK</h2>
+<p>Buka <a href="https://dotnet.microsoft.com/download" target="_blank">dotnet.microsoft.com/download</a>, unduh <b>.NET SDK</b> versi LTS (bukan hanya Runtime). SDK berisi compiler dan perkakas <code>dotnet</code> untuk membuat proyek. Setelah instal, buka terminal baru dan cek:</p>
+<pre style="background:#1e1e1e;color:#d4d4d4;padding:12px;border-radius:6px;overflow-x:auto;"><code>dotnet --version</code></pre>
+<p>Jika muncul nomor versi, instalasi berhasil. Bila muncul <i>command not found</i>, tutup lalu buka ulang terminal.</p>
+
+<h2>2. Instal Visual Studio Code</h2>
+<p>Unduh dan instal dari <a href="https://code.visualstudio.com" target="_blank">code.visualstudio.com</a>. VS Code menjadi editor sekaligus menyediakan terminal terintegrasi.</p>
+
+<h2>3. Pasang Ekstensi C# Dev Kit</h2>
+<p>Tekan <code>Ctrl+Shift+X</code>, cari <b>C# Dev Kit</b> dari Microsoft, lalu Install. Ekstensi ini menambahkan:</p>
+<ul>
+<li><b>IntelliSense</b> — pelengkapan kode otomatis dan deteksi error saat mengetik.</li>
+<li><b>Debugging</b> — menjalankan program dengan breakpoint.</li>
+<li><b>Integrasi .NET</b> — mengenali proyek <code>.csproj</code> dan perkakas build.</li>
+</ul>
+
+<h2>4. Buat &amp; Jalankan Hello World</h2>
+<p>Buka terminal VS Code dengan <code>Ctrl+`</code>, lalu jalankan:</p>
+<pre style="background:#1e1e1e;color:#d4d4d4;padding:12px;border-radius:6px;overflow-x:auto;"><code>dotnet new console -n HelloWorld
+cd HelloWorld
+dotnet run</code></pre>
+<p>Keluaran: <code>Hello, World!</code></p>
+
+<h2>5. Buat Proyek DataMahasiswa</h2>
+<pre style="background:#1e1e1e;color:#d4d4d4;padding:12px;border-radius:6px;overflow-x:auto;"><code>cd ..
+dotnet new console -n DataMahasiswa
+cd DataMahasiswa
+code .</code></pre>
+<p><code>code .</code> membuka folder proyek di VS Code agar C# Dev Kit mengenali proyek.</p>
+
+<h2>6. Ganti Isi Program.cs</h2>
+<p>Hapus seluruh isi <code>Program.cs</code> bawaan, ganti dengan kode berikut, lalu simpan (<code>Ctrl+S</code>):</p>
+<pre style="background:#1e1e1e;color:#d4d4d4;padding:12px;border-radius:6px;overflow-x:auto;font-size:13px;"><code>using System;
+using System.Collections.Generic;
+
+class Mahasiswa
+{
+    public string NIM { get; set; }
+    public string Nama { get; set; }
+    public string Prodi { get; set; }
+    public double IPK { get; set; }
+
+    public Mahasiswa(string nim, string nama, string prodi, double ipk)
+    {
+        NIM = nim; Nama = nama; Prodi = prodi; IPK = ipk;
+    }
+}
+
+class Program
+{
+    // List untuk menyimpan data mahasiswa (di memory)
+    static List&lt;Mahasiswa&gt; daftarMahasiswa = new List&lt;Mahasiswa&gt;();
+
+    static void Main()
+    {
+        // Agar ikon/emoji tampil dengan benar di konsol
+        Console.OutputEncoding = System.Text.Encoding.UTF8;
+
+        // Pakai format angka "netral" agar desimal selalu memakai titik (3.50),
+        // tidak tergantung pengaturan bahasa Windows (Indonesia memakai koma)
+        System.Globalization.CultureInfo.CurrentCulture = System.Globalization.CultureInfo.InvariantCulture;
+
+        int pilihan;
+        do
+        {
+            TampilkanMenu();
+            Console.Write("\nPilihan: ");
+            string input = Console.ReadLine();
+
+            if (!int.TryParse(input, out pilihan))
+            {
+                pilihan = 0;
+            }
+
+            Console.WriteLine();
+            switch (pilihan)
+            {
+                case 1: TambahMahasiswa(); break;
+                case 2: TampilkanMahasiswa(); break;
+                case 3: CariMahasiswa(); break;
+                case 4: HapusMahasiswa(); break;
+                case 5:
+                    Console.ForegroundColor = ConsoleColor.Green;
+                    Console.WriteLine("Terima kasih telah menggunakan program. 🎓");
+                    Console.ResetColor();
+                    break;
+                default:
+                    Console.ForegroundColor = ConsoleColor.Red;
+                    Console.WriteLine("Pilihan tidak tersedia!");
+                    Console.ResetColor();
+                    break;
+            }
+
+            if (pilihan != 5)
+            {
+                Console.WriteLine("\nTekan ENTER untuk melanjutkan...");
+                Console.ReadLine();
+            }
+        } while (pilihan != 5);
+    }
+
+    static void TampilkanMenu()
+    {
+        try { Console.Clear(); } catch { /* output dialihkan, abaikan */ }
+
+        Console.ForegroundColor = ConsoleColor.Cyan;
+        Console.WriteLine("==================================");
+        Console.WriteLine("    🎓 SISTEM DATA MAHASISWA 🎓");
+        Console.WriteLine("==================================");
+        Console.ResetColor();
+
+        TulisMenuItem(1, ConsoleColor.Green, "+", "Tambah Mahasiswa");
+        TulisMenuItem(2, ConsoleColor.Blue, "=", "Tampilkan Mahasiswa");
+        TulisMenuItem(3, ConsoleColor.Yellow, "?", "Cari Mahasiswa");
+        TulisMenuItem(4, ConsoleColor.Red, "x", "Hapus Mahasiswa");
+        TulisMenuItem(5, ConsoleColor.DarkGray, "&gt;", "Keluar");
+    }
+
+    // Menulis satu baris menu dengan "lencana" nomor berwarna
+    static void TulisMenuItem(int nomor, ConsoleColor warnaLencana, string ikon, string teks)
+    {
+        Console.Write("   ");
+
+        Console.BackgroundColor = warnaLencana;
+        Console.ForegroundColor = ConsoleColor.Black;
+        Console.Write(" " + nomor + " ");
+        Console.ResetColor();
+
+        Console.ForegroundColor = warnaLencana;
+        Console.Write("  " + ikon);
+        Console.ResetColor();
+
+        Console.WriteLine("  " + teks);
+    }
+
+    static void TambahMahasiswa()
+    {
+        Console.ForegroundColor = ConsoleColor.Green;
+        Console.WriteLine("--- TAMBAH MAHASISWA ---");
+        Console.ResetColor();
+
+        Console.Write("NIM            : ");
+        string nim = Console.ReadLine();
+
+        if (CariBerdasarkanNIM(nim) != null)
+        {
+            Console.ForegroundColor = ConsoleColor.Red;
+            Console.WriteLine("NIM sudah terdaftar!");
+            Console.ResetColor();
+            return;
+        }
+
+        Console.Write("Nama           : ");
+        string nama = Console.ReadLine();
+
+        Console.Write("Program Studi  : ");
+        string prodi = Console.ReadLine();
+
+        double ipk;
+        while (true)
+        {
+            Console.Write("IPK            : ");
+            string inputIpk = (Console.ReadLine() ?? "").Replace(',', '.'); // terima "3,5" maupun "3.5"
+            if (double.TryParse(inputIpk, out ipk))
+            {
+                if (ipk &gt;= 0 &amp;&amp; ipk &lt;= 4)
+                {
+                    break;
+                }
+            }
+
+            Console.ForegroundColor = ConsoleColor.Red;
+            Console.WriteLine("IPK harus berupa angka 0 - 4.");
+            Console.ResetColor();
+        }
+
+        Mahasiswa mahasiswa = new Mahasiswa(nim, nama, prodi, ipk);
+        daftarMahasiswa.Add(mahasiswa);
+
+        Console.ForegroundColor = ConsoleColor.Green;
+        Console.WriteLine("Data mahasiswa berhasil ditambahkan.");
+        Console.ResetColor();
+    }
+
+    static void TampilkanMahasiswa()
+    {
+        Console.ForegroundColor = ConsoleColor.Blue;
+        Console.WriteLine("--- DAFTAR MAHASISWA ---");
+        Console.ResetColor();
+
+        if (daftarMahasiswa.Count == 0)
+        {
+            Console.WriteLine("Belum ada data mahasiswa.");
+            return;
+        }
+
+        Console.WriteLine("{0,-12} {1,-20} {2,-20} {3,5}", "NIM", "Nama", "Prodi", "IPK");
+        Console.WriteLine(new string('-', 60));
+
+        foreach (Mahasiswa m in daftarMahasiswa)
+        {
+            Console.WriteLine("{0,-12} {1,-20} {2,-20} {3,5:F2}", m.NIM, m.Nama, m.Prodi, m.IPK);
+        }
+    }
+
+    static void CariMahasiswa()
+    {
+        Console.ForegroundColor = ConsoleColor.Yellow;
+        Console.WriteLine("--- CARI MAHASISWA ---");
+        Console.ResetColor();
+
+        Console.Write("Masukkan NIM: ");
+        string nimCari = Console.ReadLine();
+
+        Mahasiswa mahasiswaDitemukan = CariBerdasarkanNIM(nimCari);
+
+        if (mahasiswaDitemukan != null)
+        {
+            Console.WriteLine("\nData ditemukan:");
+            Console.WriteLine("NIM   : " + mahasiswaDitemukan.NIM);
+            Console.WriteLine("Nama  : " + mahasiswaDitemukan.Nama);
+            Console.WriteLine("Prodi : " + mahasiswaDitemukan.Prodi);
+            Console.WriteLine("IPK   : " + mahasiswaDitemukan.IPK.ToString("F2"));
+        }
+        else
+        {
+            Console.ForegroundColor = ConsoleColor.Red;
+            Console.WriteLine("Data mahasiswa tidak ditemukan.");
+            Console.ResetColor();
+        }
+    }
+
+    static void HapusMahasiswa()
+    {
+        Console.ForegroundColor = ConsoleColor.Red;
+        Console.WriteLine("--- HAPUS MAHASISWA ---");
+        Console.ResetColor();
+
+        Console.Write("Masukkan NIM: ");
+        string nimHapus = Console.ReadLine();
+
+        Mahasiswa mahasiswaDitemukan = CariBerdasarkanNIM(nimHapus);
+
+        if (mahasiswaDitemukan != null)
+        {
+            daftarMahasiswa.Remove(mahasiswaDitemukan);
+            Console.ForegroundColor = ConsoleColor.Green;
+            Console.WriteLine("Data mahasiswa berhasil dihapus.");
+            Console.ResetColor();
+        }
+        else
+        {
+            Console.ForegroundColor = ConsoleColor.Red;
+            Console.WriteLine("Data mahasiswa tidak ditemukan.");
+            Console.ResetColor();
+        }
+    }
+
+    // Pencarian linear berdasarkan NIM (tidak membedakan huruf besar/kecil)
+    static Mahasiswa CariBerdasarkanNIM(string nim)
+    {
+        foreach (Mahasiswa m in daftarMahasiswa)
+        {
+            if (m.NIM.Equals(nim, StringComparison.OrdinalIgnoreCase))
+            {
+                return m;
+            }
+        }
+        return null;
+    }
+}</code></pre>
+
+<h2>7. Jalankan dan Uji Program</h2>
+<pre style="background:#1e1e1e;color:#d4d4d4;padding:12px;border-radius:6px;overflow-x:auto;"><code>dotnet run</code></pre>
+<ul>
+<li><b>Menu 1 — Tambah</b>: isi NIM, Nama, Prodi, IPK. Coba IPK <code>7</code> → harus ditolak. NIM yang sama juga ditolak.</li>
+<li><b>Menu 2 — Tampilkan</b>: data tampil sebagai tabel rapi dengan IPK 2 desimal.</li>
+<li><b>Menu 3 — Cari</b>: cari NIM yang ada dan yang tidak ada untuk melihat pesan "tidak ditemukan".</li>
+<li><b>Menu 4 — Hapus</b>: hapus data, lalu cek lagi di Menu 2.</li>
+<li><b>Menu 5 — Keluar</b>: program menampilkan pesan penutup dan berhenti.</li>
+</ul>
+<p>Contoh keluaran Menu 2:</p>
+<pre style="background:#1e1e1e;color:#d4d4d4;padding:12px;border-radius:6px;overflow-x:auto;"><code>--- DAFTAR MAHASISWA ---
+NIM          Nama                 Prodi                  IPK
+------------------------------------------------------------
+A01          Budi                 Informatika           3.50
+B02          Siti                 SI                    3.75</code></pre>
+
+<h2>Penjelasan Kode</h2>
+<ul>
+<li><b>class Mahasiswa</b> — cetakan data dengan 4 auto-property (<code>{ get; set; }</code>) dan constructor yang mewajibkan semua nilai diisi. NIM bertipe <code>string</code> karena bisa diawali 0, IPK bertipe <code>double</code> karena desimal.</li>
+<li><b>List&lt;Mahasiswa&gt;</b> — penyimpanan berukuran dinamis (<code>.Add()</code>, <code>.Remove()</code>). Data disimpan di RAM, jadi hilang saat program ditutup.</li>
+<li><b>Main()</b> — loop <code>do...while</code> agar menu tampil minimal sekali dan berulang sampai pilihan 5. <code>int.TryParse</code> mencegah crash saat input bukan angka; <code>switch</code> menyalurkan pilihan ke method fitur.</li>
+<li><b>TampilkanMenu() &amp; TulisMenuItem()</b> — pewarnaan memakai <code>Console.ForegroundColor</code>/<code>BackgroundColor</code>. Polanya selalu: set warna → tulis → <code>ResetColor()</code>. Efek kotak nomor dibuat dari latar berwarna + spasi (<code>" 1 "</code>).</li>
+<li><b>TambahMahasiswa()</b> — validasi IPK dengan <code>while (true)</code> + <code>break</code>: harus angka <i>dan</i> di rentang 0–4. Input <code>3,5</code> maupun <code>3.5</code> diterima.</li>
+<li><b>TampilkanMahasiswa()</b> — guard clause untuk daftar kosong, lalu tabel dengan format <code>{0,-12}</code> (rata kiri, lebar 12) dan <code>{3,5:F2}</code> (rata kanan, 2 desimal).</li>
+<li><b>CariBerdasarkanNIM()</b> — pencarian linear dengan <code>StringComparison.OrdinalIgnoreCase</code> ("a01" = "A01"), dipakai menu Tambah (cek duplikat), Cari, dan Hapus. Penghapusan dilakukan setelah loop selesai agar tidak memicu <code>InvalidOperationException</code>.</li>
+<li><b>CultureInfo.InvariantCulture</b> — memastikan angka desimal selalu memakai titik walau Windows berbahasa Indonesia.</li>
+</ul>
+
+<h2>Ringkasan Perintah</h2>
+<pre style="background:#1e1e1e;color:#d4d4d4;padding:12px;border-radius:6px;overflow-x:auto;"><code>dotnet --version
+
+dotnet new console -n HelloWorld
+cd HelloWorld
+dotnet run
+
+cd ..
+dotnet new console -n DataMahasiswa
+cd DataMahasiswa
+code .
+
+dotnet run</code></pre>
+
+</div>
