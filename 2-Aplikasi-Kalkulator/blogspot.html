@@ -1,0 +1,261 @@
+<!-- Tempel seluruh isi file ini di Blogger: New Post → ikon pensil → HTML view -->
+<div style="font-family:Segoe UI,Arial,sans-serif;line-height:1.7;color:#222;">
+
+<h1>Tugas 2 PBKK — Aplikasi Kalkulator (C# Console)</h1>
+
+<p>📂 Source code lengkap: <a href="https://github.com/miaikoo/2026-framework-based-programming/tree/main/2-Aplikasi-Kalkulator" target="_blank">github.com/miaikoo/2026-framework-based-programming</a></p>
+
+<p>Pada tugas ini dibuat <b>aplikasi kalkulator</b> berbasis console application C# dengan menu berwarna, validasi input, penanganan error (pembagian dengan nol dan akar bilangan negatif), serta riwayat perhitungan. Langkah instalasi .NET SDK, VS Code, dan C# Dev Kit sama seperti Tugas 1.</p>
+
+<h2>Fitur</h2>
+<ul>
+<li><b>1 — Penjumlahan</b>: <code>a + b</code></li>
+<li><b>2 — Pengurangan</b>: <code>a - b</code></li>
+<li><b>3 — Perkalian</b>: <code>a × b</code></li>
+<li><b>4 — Pembagian</b>: <code>a ÷ b</code>, menolak pembagian dengan nol</li>
+<li><b>5 — Pangkat</b>: <code>a ^ b</code> memakai <code>Math.Pow</code></li>
+<li><b>6 — Akar Kuadrat</b>: <code>√a</code> memakai <code>Math.Sqrt</code>, menolak bilangan negatif</li>
+<li><b>7 — Riwayat</b>: menampilkan semua perhitungan sebelumnya</li>
+<li><b>8 — Keluar</b>: menutup program</li>
+</ul>
+
+<h2>1. Buat Proyek</h2>
+<p>Buka terminal VS Code dengan <code>Ctrl+`</code>, lalu jalankan:</p>
+<pre style="background:#1e1e1e;color:#d4d4d4;padding:12px;border-radius:6px;overflow-x:auto;"><code>dotnet new console -n Kalkulator
+cd Kalkulator
+code .</code></pre>
+
+<h2>2. Ganti Isi Program.cs</h2>
+<p>Hapus seluruh isi <code>Program.cs</code> bawaan, ganti dengan kode berikut, lalu simpan (<code>Ctrl+S</code>):</p>
+<pre style="background:#1e1e1e;color:#d4d4d4;padding:12px;border-radius:6px;overflow-x:auto;font-size:13px;"><code>using System;
+using System.Collections.Generic;
+using System.Globalization;
+
+class Program
+{
+    // Riwayat perhitungan disimpan di memory (hilang saat program ditutup)
+    static List&lt;string&gt; riwayat = new List&lt;string&gt;();
+
+    static void Main()
+    {
+        // Agar ikon/emoji tampil dengan benar di konsol
+        Console.OutputEncoding = System.Text.Encoding.UTF8;
+
+        // Desimal selalu memakai titik (2.5), tidak tergantung bahasa Windows
+        CultureInfo.CurrentCulture = CultureInfo.InvariantCulture;
+
+        int pilihan;
+        do
+        {
+            TampilkanMenu();
+            Console.Write("\nPilihan: ");
+
+            if (!int.TryParse(Console.ReadLine(), out pilihan))
+            {
+                pilihan = 0;
+            }
+
+            Console.WriteLine();
+            switch (pilihan)
+            {
+                case 1: HitungDuaAngka("+", "PENJUMLAHAN", ConsoleColor.Green); break;
+                case 2: HitungDuaAngka("-", "PENGURANGAN", ConsoleColor.Blue); break;
+                case 3: HitungDuaAngka("×", "PERKALIAN", ConsoleColor.Yellow); break;
+                case 4: HitungDuaAngka("÷", "PEMBAGIAN", ConsoleColor.Magenta); break;
+                case 5: HitungDuaAngka("^", "PANGKAT", ConsoleColor.Cyan); break;
+                case 6: HitungAkar(); break;
+                case 7: TampilkanRiwayat(); break;
+                case 8:
+                    Console.ForegroundColor = ConsoleColor.Green;
+                    Console.WriteLine("Terima kasih telah menggunakan kalkulator. 🧮");
+                    Console.ResetColor();
+                    break;
+                default:
+                    TulisWarna("Pilihan tidak tersedia!", ConsoleColor.Red);
+                    break;
+            }
+
+            if (pilihan != 8)
+            {
+                Console.WriteLine("\nTekan ENTER untuk melanjutkan...");
+                Console.ReadLine();
+            }
+        } while (pilihan != 8);
+    }
+
+    static void TampilkanMenu()
+    {
+        try { Console.Clear(); } catch { /* output dialihkan, abaikan */ }
+
+        Console.ForegroundColor = ConsoleColor.Cyan;
+        Console.WriteLine("==================================");
+        Console.WriteLine("      🧮 APLIKASI KALKULATOR 🧮");
+        Console.WriteLine("==================================");
+        Console.ResetColor();
+
+        TulisMenuItem(1, ConsoleColor.Green, "+", "Penjumlahan");
+        TulisMenuItem(2, ConsoleColor.Blue, "-", "Pengurangan");
+        TulisMenuItem(3, ConsoleColor.Yellow, "×", "Perkalian");
+        TulisMenuItem(4, ConsoleColor.Magenta, "÷", "Pembagian");
+        TulisMenuItem(5, ConsoleColor.Cyan, "^", "Pangkat");
+        TulisMenuItem(6, ConsoleColor.DarkYellow, "√", "Akar Kuadrat");
+        TulisMenuItem(7, ConsoleColor.White, "≡", "Riwayat Perhitungan");
+        TulisMenuItem(8, ConsoleColor.DarkGray, "&gt;", "Keluar");
+    }
+
+    // Menulis satu baris menu dengan "lencana" nomor berwarna
+    static void TulisMenuItem(int nomor, ConsoleColor warnaLencana, string ikon, string teks)
+    {
+        Console.Write("   ");
+
+        Console.BackgroundColor = warnaLencana;
+        Console.ForegroundColor = ConsoleColor.Black;
+        Console.Write(" " + nomor + " ");
+        Console.ResetColor();
+
+        Console.ForegroundColor = warnaLencana;
+        Console.Write("  " + ikon);
+        Console.ResetColor();
+
+        Console.WriteLine("  " + teks);
+    }
+
+    // Membaca angka sampai input valid; menerima "2.5" maupun "2,5"
+    static double BacaAngka(string label)
+    {
+        while (true)
+        {
+            Console.Write(label);
+            string input = (Console.ReadLine() ?? "").Replace(',', '.');
+
+            if (double.TryParse(input, out double angka))
+            {
+                return angka;
+            }
+
+            TulisWarna("Input harus berupa angka!", ConsoleColor.Red);
+        }
+    }
+
+    // Operasi dengan dua angka: +, -, ×, ÷, ^
+    static void HitungDuaAngka(string op, string judul, ConsoleColor warna)
+    {
+        TulisWarna("--- " + judul + " ---", warna);
+
+        double a = BacaAngka("Angka pertama : ");
+        double b = BacaAngka("Angka kedua   : ");
+
+        double hasil;
+        switch (op)
+        {
+            case "+": hasil = a + b; break;
+            case "-": hasil = a - b; break;
+            case "×": hasil = a * b; break;
+            case "÷":
+                if (b == 0)
+                {
+                    TulisWarna("Error: tidak bisa membagi dengan nol!", ConsoleColor.Red);
+                    return;
+                }
+                hasil = a / b;
+                break;
+            case "^": hasil = Math.Pow(a, b); break;
+            default: return;
+        }
+
+        TampilkanHasil(Format(a) + " " + op + " " + Format(b), hasil);
+    }
+
+    static void HitungAkar()
+    {
+        TulisWarna("--- AKAR KUADRAT ---", ConsoleColor.DarkYellow);
+
+        double a = BacaAngka("Angka : ");
+
+        if (a &lt; 0)
+        {
+            TulisWarna("Error: akar dari bilangan negatif tidak terdefinisi!", ConsoleColor.Red);
+            return;
+        }
+
+        TampilkanHasil("√" + Format(a), Math.Sqrt(a));
+    }
+
+    static void TampilkanHasil(string ekspresi, double hasil)
+    {
+        string baris = ekspresi + " = " + Format(hasil);
+        riwayat.Add(baris);
+
+        Console.Write("\nHasil : ");
+        TulisWarna(baris, ConsoleColor.Green);
+    }
+
+    static void TampilkanRiwayat()
+    {
+        TulisWarna("--- RIWAYAT PERHITUNGAN ---", ConsoleColor.White);
+
+        if (riwayat.Count == 0)
+        {
+            Console.WriteLine("Belum ada perhitungan.");
+            return;
+        }
+
+        for (int i = 0; i &lt; riwayat.Count; i++)
+        {
+            Console.WriteLine("{0,3}. {1}", i + 1, riwayat[i]);
+        }
+    }
+
+    // Maksimal 4 angka desimal, tanpa nol berlebih: 2.5 bukan 2.5000
+    static string Format(double angka)
+    {
+        return angka.ToString("0.####");
+    }
+
+    static void TulisWarna(string teks, ConsoleColor warna)
+    {
+        Console.ForegroundColor = warna;
+        Console.WriteLine(teks);
+        Console.ResetColor();
+    }
+}</code></pre>
+
+<h2>3. Jalankan dan Uji Program</h2>
+<pre style="background:#1e1e1e;color:#d4d4d4;padding:12px;border-radius:6px;overflow-x:auto;"><code>dotnet run</code></pre>
+<ul>
+<li><b>Penjumlahan</b> <code>12</code> dan <code>8</code> → <code>12 + 8 = 20</code></li>
+<li><b>Desimal</b> <code>2,5</code> × <code>4</code> → <code>2.5 × 4 = 10</code> (koma maupun titik diterima)</li>
+<li><b>Bagi nol</b> <code>10</code> ÷ <code>0</code> → <code>Error: tidak bisa membagi dengan nol!</code></li>
+<li><b>Input huruf</b> <code>abc</code> → <code>Input harus berupa angka!</code> lalu diminta ulang</li>
+<li><b>Akar negatif</b> <code>-9</code> → <code>Error: akar dari bilangan negatif tidak terdefinisi!</code></li>
+<li><b>Riwayat</b> (menu 7) → semua perhitungan yang berhasil tercantum bernomor</li>
+</ul>
+<p>Contoh keluaran menu Riwayat:</p>
+<pre style="background:#1e1e1e;color:#d4d4d4;padding:12px;border-radius:6px;overflow-x:auto;"><code>--- RIWAYAT PERHITUNGAN ---
+  1. 12 + 8 = 20
+  2. 5 - 7.5 = -2.5
+  3. 2.5 × 4 = 10
+  4. 10 ÷ 3 = 3.3333
+  5. 2 ^ 10 = 1024
+  6. √144 = 12</code></pre>
+
+<h2>Penjelasan Kode</h2>
+<ul>
+<li><b>List&lt;string&gt; riwayat</b> — setiap hasil perhitungan disimpan sebagai teks agar bisa ditampilkan di menu Riwayat. Disimpan di RAM, jadi hilang saat program ditutup.</li>
+<li><b>Main()</b> — loop <code>do...while</code> dengan <code>int.TryParse</code> (anti-crash) dan <code>switch</code>. Lima operasi dua angka cukup memanggil satu method <code>HitungDuaAngka()</code> dengan parameter simbol, judul, dan warna berbeda.</li>
+<li><b>BacaAngka()</b> — loop <code>while (true)</code> yang terus meminta input sampai berupa angka. Koma diganti titik sehingga <code>2,5</code> dan <code>2.5</code> sama-sama diterima.</li>
+<li><b>HitungDuaAngka()</b> — <code>switch</code> pada simbol operator. Sebelum membagi dicek <code>b == 0</code>; jika ya, tampil pesan error dan <code>return</code> lebih awal (guard clause) sehingga tidak menghasilkan <code>∞</code>. Pangkat memakai <code>Math.Pow(a, b)</code>.</li>
+<li><b>HitungAkar()</b> — menolak bilangan negatif karena <code>Math.Sqrt(-9)</code> menghasilkan <code>NaN</code>.</li>
+<li><b>TampilkanHasil()</b> — mencetak hasil berwarna hijau sekaligus menambahkannya ke riwayat. Hanya perhitungan yang berhasil yang masuk riwayat.</li>
+<li><b>Format()</b> — <code>ToString("0.####")</code> menampilkan maksimal 4 desimal tanpa nol berlebih: <code>10 ÷ 3 = 3.3333</code>.</li>
+<li><b>TulisMenuItem() &amp; TulisWarna()</b> — helper pewarnaan dengan pola set warna → tulis → <code>ResetColor()</code> agar kode tidak berulang.</li>
+<li><b>CultureInfo.InvariantCulture</b> — desimal selalu memakai titik walau Windows berbahasa Indonesia.</li>
+</ul>
+
+<h2>Ringkasan Perintah</h2>
+<pre style="background:#1e1e1e;color:#d4d4d4;padding:12px;border-radius:6px;overflow-x:auto;"><code>dotnet new console -n Kalkulator
+cd Kalkulator
+code .
+dotnet run</code></pre>
+
+</div>
