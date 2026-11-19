@@ -1,0 +1,873 @@
+<!-- Tempel seluruh isi file ini di Blogger: New Post → ikon pensil → HTML view -->
+<div style="font-family:Segoe UI,Arial,sans-serif;line-height:1.7;color:#222;">
+
+<h1>Tugas 4 PBKK — Student Management System (WPF .NET 8 + MVVM + SQL Server)</h1>
+
+<p>📂 Source code lengkap: <a href="https://github.com/miaikoo/2026-framework-based-programming/tree/main/4-Student-Management-MVVM" target="_blank">github.com/miaikoo/2026-framework-based-programming</a></p>
+
+<p>Latihan ini berupa studi kasus pembuatan aplikasi <b>Student Management System</b> berbasis <b>WPF (.NET 8)</b> dengan pola arsitektur <b>MVVM (Model-View-ViewModel)</b>. Aplikasi mengelola data mahasiswa (NIM, Nama, Jurusan, Gender, Email) dengan fitur <b>CRUD</b>, <b>pencarian</b>, dan <b>statistik</b>, yang seluruhnya terhubung ke <b>SQL Server</b> melalui <b>ADO.NET</b>.</p>
+
+<h2>Arsitektur MVVM</h2>
+<ul>
+<li><b>Model</b> (<code>Student</code>) — hanya berisi data, tidak tahu UI maupun database.</li>
+<li><b>View</b> (<code>MainWindow.xaml</code>) — hanya tampilan. Tidak ada event <code>Click</code>; semua terhubung lewat <code>{Binding}</code> dan <code>Command</code>.</li>
+<li><b>ViewModel</b> (<code>MainViewModel</code>) — menyimpan isi form, daftar mahasiswa, statistik, serta logika validasi dan CRUD. Tidak menyentuh kontrol UI.</li>
+<li><b>Repository</b> (<code>StudentRepository</code>) — satu-satunya bagian yang berkomunikasi dengan SQL Server lewat ADO.NET.</li>
+</ul>
+<pre style="background:#1e1e1e;color:#d4d4d4;padding:12px;border-radius:6px;overflow-x:auto;"><code>View (XAML)  ──binding/command──►  ViewModel  ──panggil──►  Repository (ADO.NET)  ──►  SQL Server
+             ◄──PropertyChanged───             ◄──Model───</code></pre>
+
+<h2>Struktur Proyek</h2>
+<pre style="background:#1e1e1e;color:#d4d4d4;padding:12px;border-radius:6px;overflow-x:auto;"><code>StudentManagement/
+├── App.xaml
+├── Models/       Student.cs, Statistik.cs
+├── Data/         Database.cs, StudentRepository.cs
+├── ViewModels/   BaseViewModel.cs, RelayCommand.cs, MainViewModel.cs
+└── Views/        MainWindow.xaml, MainWindow.xaml.cs</code></pre>
+
+<h2>Fitur</h2>
+<ul>
+<li><b>Create</b> — tombol Tambah → <code>INSERT</code></li>
+<li><b>Read</b> — tabel dimuat dari database saat aplikasi dibuka → <code>SELECT</code></li>
+<li><b>Update</b> — klik baris, ubah data, tombol Ubah → <code>UPDATE</code></li>
+<li><b>Delete</b> — klik baris, tombol Hapus, konfirmasi → <code>DELETE</code></li>
+<li><b>Pencarian</b> — hasil langsung tersaring saat mengetik (NIM/Nama/Jurusan/Email) → <code>LIKE</code></li>
+<li><b>Statistik</b> — total, jumlah laki-laki/perempuan, dan per jurusan → <code>COUNT</code>, <code>SUM(CASE…)</code>, <code>GROUP BY</code></li>
+<li><b>Validasi</b> — kolom wajib, NIM angka minimal 5 digit, format email, NIM tidak boleh ganda</li>
+</ul>
+
+<h2>1. Siapkan SQL Server</h2>
+<p>Instal SQL Server (Developer/Express) dan pastikan service-nya berjalan. Jika mati, buka PowerShell <b>Run as Administrator</b>:</p>
+<pre style="background:#1e1e1e;color:#d4d4d4;padding:12px;border-radius:6px;overflow-x:auto;"><code>Start-Service MSSQLSERVER</code></pre>
+<p>Aplikasi otomatis membuat database <code>StudentDB</code> dan tabel <code>Students</code> saat pertama dijalankan. Skrip SQL manualnya:</p>
+<pre style="background:#1e1e1e;color:#d4d4d4;padding:12px;border-radius:6px;overflow-x:auto;font-size:13px;"><code>-- Skrip database Student Management System
+-- (Opsional: aplikasi juga membuat database &amp; tabel ini otomatis saat pertama dijalankan)
+
+IF DB_ID('StudentDB') IS NULL
+    CREATE DATABASE StudentDB;
+GO
+
+USE StudentDB;
+GO
+
+IF OBJECT_ID('dbo.Students', 'U') IS NULL
+CREATE TABLE dbo.Students (
+    Id      INT IDENTITY(1,1) PRIMARY KEY,
+    Nim     VARCHAR(20)   NOT NULL UNIQUE,
+    Nama    NVARCHAR(100) NOT NULL,
+    Jurusan NVARCHAR(100) NOT NULL,
+    Gender  NVARCHAR(20)  NOT NULL,
+    Email   NVARCHAR(100) NOT NULL
+);
+GO
+
+-- Data contoh (opsional)
+INSERT INTO dbo.Students (Nim, Nama, Jurusan, Gender, Email) VALUES
+('5025231001', N'Budi Santoso',  N'Teknik Informatika', N'Laki-laki', 'budi.santoso@email.com'),
+('5026231002', N'Siti Aminah',   N'Sistem Informasi',   N'Perempuan', 'siti.aminah@email.com'),
+('5027231003', N'Andi Pratama',  N'Sains Data',         N'Laki-laki', 'andi.pratama@email.com');
+GO</code></pre>
+
+<h2>2. Buat Proyek dan Pasang Paket ADO.NET</h2>
+<pre style="background:#1e1e1e;color:#d4d4d4;padding:12px;border-radius:6px;overflow-x:auto;"><code>dotnet new wpf -n StudentManagement
+cd StudentManagement
+dotnet add package Microsoft.Data.SqlClient
+code .</code></pre>
+
+<h2>3. Isi Kode</h2>
+<p>Buat folder <code>Models</code>, <code>Data</code>, <code>ViewModels</code>, dan <code>Views</code>. Hapus <code>MainWindow.xaml</code> bawaan di root karena dipindah ke folder <code>Views</code>.</p>
+
+<h3>App.xaml</h3>
+<pre style="background:#1e1e1e;color:#d4d4d4;padding:12px;border-radius:6px;overflow-x:auto;font-size:13px;"><code>&lt;Application x:Class="StudentManagement.App"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             StartupUri="Views/MainWindow.xaml"&gt;
+    &lt;Application.Resources&gt;
+        &lt;SolidColorBrush x:Key="Primer" Color="#2563EB"/&gt;
+
+        &lt;Style x:Key="Label" TargetType="TextBlock"&gt;
+            &lt;Setter Property="FontWeight" Value="SemiBold"/&gt;
+            &lt;Setter Property="Foreground" Value="#334155"/&gt;
+            &lt;Setter Property="Margin" Value="0,10,0,4"/&gt;
+        &lt;/Style&gt;
+
+        &lt;Style TargetType="TextBox"&gt;
+            &lt;Setter Property="Padding" Value="8,6"/&gt;
+            &lt;Setter Property="FontSize" Value="14"/&gt;
+            &lt;Setter Property="BorderBrush" Value="#CBD5E1"/&gt;
+        &lt;/Style&gt;
+
+        &lt;Style TargetType="ComboBox"&gt;
+            &lt;Setter Property="Padding" Value="8,6"/&gt;
+            &lt;Setter Property="FontSize" Value="14"/&gt;
+        &lt;/Style&gt;
+
+        &lt;Style x:Key="Tombol" TargetType="Button"&gt;
+            &lt;Setter Property="Padding" Value="16,8"/&gt;
+            &lt;Setter Property="FontSize" Value="14"/&gt;
+            &lt;Setter Property="FontWeight" Value="SemiBold"/&gt;
+            &lt;Setter Property="Cursor" Value="Hand"/&gt;
+            &lt;Setter Property="BorderThickness" Value="0"/&gt;
+            &lt;Setter Property="Margin" Value="0,0,8,0"/&gt;
+        &lt;/Style&gt;
+
+        &lt;!-- Kartu statistik --&gt;
+        &lt;Style x:Key="Kartu" TargetType="Border"&gt;
+            &lt;Setter Property="Background" Value="White"/&gt;
+            &lt;Setter Property="CornerRadius" Value="8"/&gt;
+            &lt;Setter Property="Padding" Value="16,12"/&gt;
+            &lt;Setter Property="BorderBrush" Value="#E2E8F0"/&gt;
+            &lt;Setter Property="BorderThickness" Value="1"/&gt;
+        &lt;/Style&gt;
+    &lt;/Application.Resources&gt;
+&lt;/Application&gt;</code></pre>
+
+<h3>Models/Student.cs</h3>
+<pre style="background:#1e1e1e;color:#d4d4d4;padding:12px;border-radius:6px;overflow-x:auto;font-size:13px;"><code>namespace StudentManagement.Models
+{
+    // MODEL: representasi satu baris tabel Students di database
+    public class Student
+    {
+        public int Id { get; set; }
+        public string Nim { get; set; }
+        public string Nama { get; set; }
+        public string Jurusan { get; set; }
+        public string Gender { get; set; }
+        public string Email { get; set; }
+    }
+}</code></pre>
+
+<h3>Models/Statistik.cs</h3>
+<pre style="background:#1e1e1e;color:#d4d4d4;padding:12px;border-radius:6px;overflow-x:auto;font-size:13px;"><code>namespace StudentManagement.Models
+{
+    // Hasil hitungan statistik dari database
+    public class Statistik
+    {
+        public int Total { get; set; }
+        public int LakiLaki { get; set; }
+        public int Perempuan { get; set; }
+        public List&lt;JumlahJurusan&gt; PerJurusan { get; set; } = new List&lt;JumlahJurusan&gt;();
+    }
+
+    public class JumlahJurusan
+    {
+        public string Jurusan { get; set; }
+        public int Jumlah { get; set; }
+    }
+}</code></pre>
+
+<h3>Data/Database.cs</h3>
+<pre style="background:#1e1e1e;color:#d4d4d4;padding:12px;border-radius:6px;overflow-x:auto;font-size:13px;"><code>using Microsoft.Data.SqlClient;
+
+namespace StudentManagement.Data
+{
+    // Pengaturan koneksi + pembuatan database/tabel otomatis saat aplikasi pertama kali jalan
+    public static class Database
+    {
+        // Ganti "localhost" jika nama server berbeda, misal "localhost\SQLEXPRESS" atau "(localdb)\MSSQLLocalDB"
+        private const string Server = "localhost";
+        private const string NamaDatabase = "StudentDB";
+
+        public static string ConnectionString =&gt;
+            $"Server={Server};Database={NamaDatabase};Trusted_Connection=True;TrustServerCertificate=True;";
+
+        private static string MasterConnectionString =&gt;
+            $"Server={Server};Database=master;Trusted_Connection=True;TrustServerCertificate=True;";
+
+        public static void Inisialisasi()
+        {
+            // 1. Buat database jika belum ada
+            using (var conn = new SqlConnection(MasterConnectionString))
+            {
+                conn.Open();
+                var cmd = new SqlCommand(
+                    $"IF DB_ID('{NamaDatabase}') IS NULL CREATE DATABASE [{NamaDatabase}];", conn);
+                cmd.ExecuteNonQuery();
+            }
+
+            // 2. Buat tabel jika belum ada
+            using (var conn = new SqlConnection(ConnectionString))
+            {
+                conn.Open();
+                var cmd = new SqlCommand(@"
+                    IF OBJECT_ID('dbo.Students', 'U') IS NULL
+                    CREATE TABLE dbo.Students (
+                        Id      INT IDENTITY(1,1) PRIMARY KEY,
+                        Nim     VARCHAR(20)   NOT NULL UNIQUE,
+                        Nama    NVARCHAR(100) NOT NULL,
+                        Jurusan NVARCHAR(100) NOT NULL,
+                        Gender  NVARCHAR(20)  NOT NULL,
+                        Email   NVARCHAR(100) NOT NULL
+                    );", conn);
+                cmd.ExecuteNonQuery();
+            }
+        }
+    }
+}</code></pre>
+
+<h3>Data/StudentRepository.cs</h3>
+<pre style="background:#1e1e1e;color:#d4d4d4;padding:12px;border-radius:6px;overflow-x:auto;font-size:13px;"><code>using Microsoft.Data.SqlClient;
+using StudentManagement.Models;
+
+namespace StudentManagement.Data
+{
+    // Semua akses database (ADO.NET) dikumpulkan di sini.
+    // Selalu memakai parameter (@Nim, @Nama, ...) untuk mencegah SQL Injection.
+    public class StudentRepository
+    {
+        public List&lt;Student&gt; GetAll()
+        {
+            return Query("SELECT Id, Nim, Nama, Jurusan, Gender, Email FROM Students ORDER BY Nim", null);
+        }
+
+        public List&lt;Student&gt; Search(string kataKunci)
+        {
+            return Query(@"SELECT Id, Nim, Nama, Jurusan, Gender, Email FROM Students
+                           WHERE Nim LIKE @k OR Nama LIKE @k OR Jurusan LIKE @k OR Email LIKE @k
+                           ORDER BY Nim",
+                         cmd =&gt; cmd.Parameters.AddWithValue("@k", "%" + kataKunci + "%"));
+        }
+
+        public void Insert(Student s)
+        {
+            Execute(@"INSERT INTO Students (Nim, Nama, Jurusan, Gender, Email)
+                      VALUES (@Nim, @Nama, @Jurusan, @Gender, @Email)", s);
+        }
+
+        public void Update(Student s)
+        {
+            Execute(@"UPDATE Students
+                      SET Nim = @Nim, Nama = @Nama, Jurusan = @Jurusan, Gender = @Gender, Email = @Email
+                      WHERE Id = @Id", s);
+        }
+
+        public void Delete(int id)
+        {
+            using var conn = new SqlConnection(Database.ConnectionString);
+            using var cmd = new SqlCommand("DELETE FROM Students WHERE Id = @Id", conn);
+            cmd.Parameters.AddWithValue("@Id", id);
+            conn.Open();
+            cmd.ExecuteNonQuery();
+        }
+
+        // Cek NIM ganda; abaikanId dipakai saat update agar data itu sendiri tidak dihitung
+        public bool NimSudahAda(string nim, int abaikanId = 0)
+        {
+            using var conn = new SqlConnection(Database.ConnectionString);
+            using var cmd = new SqlCommand("SELECT COUNT(*) FROM Students WHERE Nim = @Nim AND Id &lt;&gt; @Id", conn);
+            cmd.Parameters.AddWithValue("@Nim", nim);
+            cmd.Parameters.AddWithValue("@Id", abaikanId);
+            conn.Open();
+            return (int)cmd.ExecuteScalar() &gt; 0;
+        }
+
+        public Statistik GetStatistik()
+        {
+            var stat = new Statistik();
+            using var conn = new SqlConnection(Database.ConnectionString);
+            conn.Open();
+
+            // Total dan jumlah per gender dalam satu query
+            using (var cmd = new SqlCommand(@"
+                SELECT COUNT(*),
+                       SUM(CASE WHEN Gender = 'Laki-laki' THEN 1 ELSE 0 END),
+                       SUM(CASE WHEN Gender = 'Perempuan' THEN 1 ELSE 0 END)
+                FROM Students", conn))
+            using (var r = cmd.ExecuteReader())
+            {
+                if (r.Read())
+                {
+                    stat.Total = r.GetInt32(0);
+                    stat.LakiLaki = r.IsDBNull(1) ? 0 : r.GetInt32(1);
+                    stat.Perempuan = r.IsDBNull(2) ? 0 : r.GetInt32(2);
+                }
+            }
+
+            // Jumlah per jurusan
+            using (var cmd = new SqlCommand(
+                "SELECT Jurusan, COUNT(*) FROM Students GROUP BY Jurusan ORDER BY COUNT(*) DESC, Jurusan", conn))
+            using (var r = cmd.ExecuteReader())
+            {
+                while (r.Read())
+                {
+                    stat.PerJurusan.Add(new JumlahJurusan { Jurusan = r.GetString(0), Jumlah = r.GetInt32(1) });
+                }
+            }
+
+            return stat;
+        }
+
+        // ===== Helper =====
+
+        private List&lt;Student&gt; Query(string sql, Action&lt;SqlCommand&gt; isiParameter)
+        {
+            var hasil = new List&lt;Student&gt;();
+            using var conn = new SqlConnection(Database.ConnectionString);
+            using var cmd = new SqlCommand(sql, conn);
+            isiParameter?.Invoke(cmd);
+            conn.Open();
+
+            using var reader = cmd.ExecuteReader();
+            while (reader.Read())
+            {
+                hasil.Add(new Student
+                {
+                    Id = reader.GetInt32(0),
+                    Nim = reader.GetString(1),
+                    Nama = reader.GetString(2),
+                    Jurusan = reader.GetString(3),
+                    Gender = reader.GetString(4),
+                    Email = reader.GetString(5)
+                });
+            }
+            return hasil;
+        }
+
+        private void Execute(string sql, Student s)
+        {
+            using var conn = new SqlConnection(Database.ConnectionString);
+            using var cmd = new SqlCommand(sql, conn);
+            cmd.Parameters.AddWithValue("@Id", s.Id);
+            cmd.Parameters.AddWithValue("@Nim", s.Nim);
+            cmd.Parameters.AddWithValue("@Nama", s.Nama);
+            cmd.Parameters.AddWithValue("@Jurusan", s.Jurusan);
+            cmd.Parameters.AddWithValue("@Gender", s.Gender);
+            cmd.Parameters.AddWithValue("@Email", s.Email);
+            conn.Open();
+            cmd.ExecuteNonQuery();
+        }
+    }
+}</code></pre>
+
+<h3>ViewModels/BaseViewModel.cs</h3>
+<pre style="background:#1e1e1e;color:#d4d4d4;padding:12px;border-radius:6px;overflow-x:auto;font-size:13px;"><code>using System.ComponentModel;
+using System.Runtime.CompilerServices;
+
+namespace StudentManagement.ViewModels
+{
+    // Dasar semua ViewModel: memberi tahu View setiap kali sebuah properti berubah
+    public abstract class BaseViewModel : INotifyPropertyChanged
+    {
+        public event PropertyChangedEventHandler PropertyChanged;
+
+        protected void OnPropertyChanged([CallerMemberName] string nama = null)
+        {
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nama));
+        }
+
+        // Mengubah nilai field lalu memicu notifikasi hanya jika nilainya benar-benar berubah
+        protected bool Set&lt;T&gt;(ref T field, T nilai, [CallerMemberName] string nama = null)
+        {
+            if (EqualityComparer&lt;T&gt;.Default.Equals(field, nilai)) return false;
+            field = nilai;
+            OnPropertyChanged(nama);
+            return true;
+        }
+    }
+}</code></pre>
+
+<h3>ViewModels/RelayCommand.cs</h3>
+<pre style="background:#1e1e1e;color:#d4d4d4;padding:12px;border-radius:6px;overflow-x:auto;font-size:13px;"><code>using System.Windows.Input;
+
+namespace StudentManagement.ViewModels
+{
+    // Menghubungkan tombol di View ke method di ViewModel tanpa event handler Click
+    public class RelayCommand : ICommand
+    {
+        private readonly Action execute;
+        private readonly Func&lt;bool&gt; canExecute;
+
+        public RelayCommand(Action execute, Func&lt;bool&gt; canExecute = null)
+        {
+            this.execute = execute;
+            this.canExecute = canExecute;
+        }
+
+        public bool CanExecute(object parameter) =&gt; canExecute == null || canExecute();
+
+        public void Execute(object parameter) =&gt; execute();
+
+        // WPF akan mengecek ulang CanExecute (aktif/nonaktif tombol) secara otomatis
+        public event EventHandler CanExecuteChanged
+        {
+            add =&gt; CommandManager.RequerySuggested += value;
+            remove =&gt; CommandManager.RequerySuggested -= value;
+        }
+    }
+}</code></pre>
+
+<h3>ViewModels/MainViewModel.cs</h3>
+<pre style="background:#1e1e1e;color:#d4d4d4;padding:12px;border-radius:6px;overflow-x:auto;font-size:13px;"><code>using System.Collections.ObjectModel;
+using System.Text.RegularExpressions;
+using System.Windows.Input;
+using StudentManagement.Data;
+using StudentManagement.Models;
+
+namespace StudentManagement.ViewModels
+{
+    // VIEWMODEL: menyimpan state layar + logika, tanpa tahu apa pun tentang kontrol UI
+    public class MainViewModel : BaseViewModel
+    {
+        private readonly StudentRepository repo = new StudentRepository();
+
+        // ===== Data untuk View =====
+        public ObservableCollection&lt;Student&gt; Students { get; } = new ObservableCollection&lt;Student&gt;();
+        public ObservableCollection&lt;JumlahJurusan&gt; StatistikJurusan { get; } = new ObservableCollection&lt;JumlahJurusan&gt;();
+
+        public List&lt;string&gt; DaftarJurusan { get; } = new List&lt;string&gt;
+        {
+            "Teknik Informatika", "Sistem Informasi", "Teknologi Informasi",
+            "Rekayasa Perangkat Lunak", "Sains Data"
+        };
+
+        // ===== Field formulir (two-way binding) =====
+        private string nim, nama, jurusan, email, cari, pesan;
+        private bool isLaki = true, isPerempuan, pesanError;
+        private int total, jumlahLaki, jumlahPerempuan;
+        private Student selectedStudent;
+
+        public string Nim { get =&gt; nim; set =&gt; Set(ref nim, value); }
+        public string Nama { get =&gt; nama; set =&gt; Set(ref nama, value); }
+        public string Jurusan { get =&gt; jurusan; set =&gt; Set(ref jurusan, value); }
+        public string Email { get =&gt; email; set =&gt; Set(ref email, value); }
+        public bool IsLaki { get =&gt; isLaki; set =&gt; Set(ref isLaki, value); }
+        public bool IsPerempuan { get =&gt; isPerempuan; set =&gt; Set(ref isPerempuan, value); }
+
+        public string Cari
+        {
+            get =&gt; cari;
+            set { if (Set(ref cari, value)) MuatData(); }   // pencarian langsung saat mengetik
+        }
+
+        public string Pesan { get =&gt; pesan; set =&gt; Set(ref pesan, value); }
+        public bool PesanError { get =&gt; pesanError; set =&gt; Set(ref pesanError, value); }
+
+        public int Total { get =&gt; total; set =&gt; Set(ref total, value); }
+        public int JumlahLaki { get =&gt; jumlahLaki; set =&gt; Set(ref jumlahLaki, value); }
+        public int JumlahPerempuan { get =&gt; jumlahPerempuan; set =&gt; Set(ref jumlahPerempuan, value); }
+
+        // Saat baris tabel dipilih, isi formulir dengan datanya
+        public Student SelectedStudent
+        {
+            get =&gt; selectedStudent;
+            set
+            {
+                if (!Set(ref selectedStudent, value) || value == null) return;
+                Nim = value.Nim;
+                Nama = value.Nama;
+                Jurusan = value.Jurusan;
+                Email = value.Email;
+                IsLaki = value.Gender == "Laki-laki";
+                IsPerempuan = !IsLaki;
+                Pesan = "";
+            }
+        }
+
+        // ===== Command untuk tombol =====
+        public ICommand TambahCommand { get; }
+        public ICommand UbahCommand { get; }
+        public ICommand HapusCommand { get; }
+        public ICommand BersihkanCommand { get; }
+
+        // Diisi oleh View untuk menampilkan dialog konfirmasi (ViewModel tidak memanggil MessageBox langsung)
+        public Func&lt;string, bool&gt; Konfirmasi { get; set; } = _ =&gt; true;
+
+        public MainViewModel()
+        {
+            TambahCommand = new RelayCommand(Tambah);
+            UbahCommand = new RelayCommand(Ubah, () =&gt; SelectedStudent != null);
+            HapusCommand = new RelayCommand(Hapus, () =&gt; SelectedStudent != null);
+            BersihkanCommand = new RelayCommand(Bersihkan);
+
+            try
+            {
+                Database.Inisialisasi();
+                MuatData();
+            }
+            catch (Exception ex)
+            {
+                TampilkanPesan("Gagal terhubung ke database: " + ex.Message, true);
+            }
+        }
+
+        // ===== CRUD =====
+
+        private void Tambah()
+        {
+            if (!Validasi(0)) return;
+            Jalankan(() =&gt; repo.Insert(BuatStudent(0)), "Data " + Nama.Trim() + " berhasil ditambahkan.");
+        }
+
+        private void Ubah()
+        {
+            if (!Validasi(SelectedStudent.Id)) return;
+            Jalankan(() =&gt; repo.Update(BuatStudent(SelectedStudent.Id)), "Data " + Nama.Trim() + " berhasil diperbarui.");
+        }
+
+        private void Hapus()
+        {
+            var s = SelectedStudent;
+            if (!Konfirmasi("Hapus data " + s.Nama + " (" + s.Nim + ")?")) return;
+            Jalankan(() =&gt; repo.Delete(s.Id), "Data " + s.Nama + " berhasil dihapus.");
+        }
+
+        private void Bersihkan()
+        {
+            KosongkanForm();
+            Pesan = "";
+        }
+
+        // Menjalankan operasi database, lalu memuat ulang tabel &amp; statistik
+        private void Jalankan(Action aksi, string pesanSukses)
+        {
+            try
+            {
+                aksi();
+                KosongkanForm();
+                MuatData();
+                TampilkanPesan(pesanSukses, false);
+            }
+            catch (Exception ex)
+            {
+                TampilkanPesan("Terjadi kesalahan database: " + ex.Message, true);
+            }
+        }
+
+        private void MuatData()
+        {
+            try
+            {
+                var data = string.IsNullOrWhiteSpace(Cari) ? repo.GetAll() : repo.Search(Cari.Trim());
+                Students.Clear();
+                foreach (var s in data) Students.Add(s);
+
+                var stat = repo.GetStatistik();
+                Total = stat.Total;
+                JumlahLaki = stat.LakiLaki;
+                JumlahPerempuan = stat.Perempuan;
+                StatistikJurusan.Clear();
+                foreach (var j in stat.PerJurusan) StatistikJurusan.Add(j);
+            }
+            catch (Exception ex)
+            {
+                TampilkanPesan("Gagal memuat data: " + ex.Message, true);
+            }
+        }
+
+        // ===== Helper =====
+
+        private bool Validasi(int idSaatIni)
+        {
+            if (string.IsNullOrWhiteSpace(Nim) || string.IsNullOrWhiteSpace(Nama) ||
+                string.IsNullOrWhiteSpace(Jurusan) || string.IsNullOrWhiteSpace(Email))
+                return Gagal("Semua kolom wajib diisi!");
+
+            if (!Regex.IsMatch(Nim.Trim(), @"^\d{5,20}$"))
+                return Gagal("NIM harus berupa angka (minimal 5 digit).");
+
+            if (!Regex.IsMatch(Email.Trim(), @"^[^@\s]+@[^@\s]+\.[^@\s]+$"))
+                return Gagal("Format email tidak valid.");
+
+            try
+            {
+                if (repo.NimSudahAda(Nim.Trim(), idSaatIni))
+                    return Gagal("NIM " + Nim.Trim() + " sudah terdaftar.");
+            }
+            catch (Exception ex)
+            {
+                return Gagal("Gagal mengecek NIM: " + ex.Message);
+            }
+
+            return true;
+        }
+
+        private bool Gagal(string pesan)
+        {
+            TampilkanPesan(pesan, true);
+            return false;
+        }
+
+        private Student BuatStudent(int id) =&gt; new Student
+        {
+            Id = id,
+            Nim = Nim.Trim(),
+            Nama = Nama.Trim(),
+            Jurusan = Jurusan,
+            Gender = IsLaki ? "Laki-laki" : "Perempuan",
+            Email = Email.Trim()
+        };
+
+        private void KosongkanForm()
+        {
+            Nim = Nama = Email = "";
+            Jurusan = null;
+            IsLaki = true;
+            IsPerempuan = false;
+            SelectedStudent = null;
+        }
+
+        private void TampilkanPesan(string teks, bool error)
+        {
+            PesanError = error;
+            Pesan = teks;
+        }
+    }
+}</code></pre>
+
+<h3>Views/MainWindow.xaml</h3>
+<pre style="background:#1e1e1e;color:#d4d4d4;padding:12px;border-radius:6px;overflow-x:auto;font-size:13px;"><code>&lt;Window x:Class="StudentManagement.Views.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="clr-namespace:StudentManagement.ViewModels"
+        Title="Student Management System" Height="800" Width="1150"
+        WindowStartupLocation="CenterScreen" Background="#F1F5F9" FontFamily="Segoe UI"&gt;
+
+    &lt;!-- Menghubungkan View ke ViewModel --&gt;
+    &lt;Window.DataContext&gt;
+        &lt;vm:MainViewModel/&gt;
+    &lt;/Window.DataContext&gt;
+
+    &lt;Grid Margin="20"&gt;
+        &lt;Grid.RowDefinitions&gt;
+            &lt;RowDefinition Height="Auto"/&gt;
+            &lt;RowDefinition Height="Auto"/&gt;
+            &lt;RowDefinition Height="*"/&gt;
+        &lt;/Grid.RowDefinitions&gt;
+
+        &lt;!-- ===== HEADER ===== --&gt;
+        &lt;Border Grid.Row="0" Background="{StaticResource Primer}" CornerRadius="8" Padding="20,14" Margin="0,0,0,14"&gt;
+            &lt;StackPanel&gt;
+                &lt;TextBlock Text="🎓 Student Management System" FontSize="22" FontWeight="Bold" Foreground="White"/&gt;
+                &lt;TextBlock Text="WPF .NET 8 · MVVM · SQL Server (ADO.NET)" Foreground="#DBEAFE" Margin="0,2,0,0"/&gt;
+            &lt;/StackPanel&gt;
+        &lt;/Border&gt;
+
+        &lt;!-- ===== STATISTIK ===== --&gt;
+        &lt;Grid Grid.Row="1" Margin="0,0,0,14"&gt;
+            &lt;Grid.ColumnDefinitions&gt;
+                &lt;ColumnDefinition Width="*"/&gt;
+                &lt;ColumnDefinition Width="12"/&gt;
+                &lt;ColumnDefinition Width="*"/&gt;
+                &lt;ColumnDefinition Width="12"/&gt;
+                &lt;ColumnDefinition Width="*"/&gt;
+                &lt;ColumnDefinition Width="12"/&gt;
+                &lt;ColumnDefinition Width="2*"/&gt;
+            &lt;/Grid.ColumnDefinitions&gt;
+
+            &lt;Border Grid.Column="0" Style="{StaticResource Kartu}"&gt;
+                &lt;StackPanel&gt;
+                    &lt;TextBlock Text="Total Mahasiswa" Foreground="#64748B"/&gt;
+                    &lt;TextBlock Text="{Binding Total}" FontSize="28" FontWeight="Bold" Foreground="#2563EB"/&gt;
+                &lt;/StackPanel&gt;
+            &lt;/Border&gt;
+            &lt;Border Grid.Column="2" Style="{StaticResource Kartu}"&gt;
+                &lt;StackPanel&gt;
+                    &lt;TextBlock Text="Laki-laki" Foreground="#64748B"/&gt;
+                    &lt;TextBlock Text="{Binding JumlahLaki}" FontSize="28" FontWeight="Bold" Foreground="#0891B2"/&gt;
+                &lt;/StackPanel&gt;
+            &lt;/Border&gt;
+            &lt;Border Grid.Column="4" Style="{StaticResource Kartu}"&gt;
+                &lt;StackPanel&gt;
+                    &lt;TextBlock Text="Perempuan" Foreground="#64748B"/&gt;
+                    &lt;TextBlock Text="{Binding JumlahPerempuan}" FontSize="28" FontWeight="Bold" Foreground="#DB2777"/&gt;
+                &lt;/StackPanel&gt;
+            &lt;/Border&gt;
+            &lt;Border Grid.Column="6" Style="{StaticResource Kartu}"&gt;
+                &lt;StackPanel&gt;
+                    &lt;TextBlock Text="Per Jurusan" Foreground="#64748B" Margin="0,0,0,4"/&gt;
+                    &lt;ItemsControl ItemsSource="{Binding StatistikJurusan}"&gt;
+                        &lt;ItemsControl.ItemsPanel&gt;
+                            &lt;ItemsPanelTemplate&gt;
+                                &lt;WrapPanel/&gt;
+                            &lt;/ItemsPanelTemplate&gt;
+                        &lt;/ItemsControl.ItemsPanel&gt;
+                        &lt;ItemsControl.ItemTemplate&gt;
+                            &lt;DataTemplate&gt;
+                                &lt;Border Background="#EFF6FF" CornerRadius="10" Padding="8,2" Margin="0,2,6,2"&gt;
+                                    &lt;TextBlock Foreground="#1E3A8A"&gt;
+                                        &lt;Run Text="{Binding Jurusan, Mode=OneWay}"/&gt;
+                                        &lt;Run Text="·" Foreground="#94A3B8"/&gt;
+                                        &lt;Run Text="{Binding Jumlah, Mode=OneWay}" FontWeight="Bold"/&gt;
+                                    &lt;/TextBlock&gt;
+                                &lt;/Border&gt;
+                            &lt;/DataTemplate&gt;
+                        &lt;/ItemsControl.ItemTemplate&gt;
+                    &lt;/ItemsControl&gt;
+                &lt;/StackPanel&gt;
+            &lt;/Border&gt;
+        &lt;/Grid&gt;
+
+        &lt;Grid Grid.Row="2"&gt;
+            &lt;Grid.ColumnDefinitions&gt;
+                &lt;ColumnDefinition Width="420"/&gt;
+                &lt;ColumnDefinition Width="14"/&gt;
+                &lt;ColumnDefinition Width="*"/&gt;
+            &lt;/Grid.ColumnDefinitions&gt;
+
+            &lt;!-- ===== FORMULIR ===== --&gt;
+            &lt;Border Grid.Column="0" Style="{StaticResource Kartu}" Padding="20"&gt;
+                &lt;StackPanel&gt;
+                    &lt;TextBlock Text="Data Mahasiswa" FontSize="16" FontWeight="Bold"/&gt;
+
+                    &lt;TextBlock Text="NIM" Style="{StaticResource Label}"/&gt;
+                    &lt;TextBox Text="{Binding Nim, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.AutomationId="txtNim"/&gt;
+
+                    &lt;TextBlock Text="Nama" Style="{StaticResource Label}"/&gt;
+                    &lt;TextBox Text="{Binding Nama, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.AutomationId="txtNama"/&gt;
+
+                    &lt;TextBlock Text="Jurusan" Style="{StaticResource Label}"/&gt;
+                    &lt;ComboBox ItemsSource="{Binding DaftarJurusan}" SelectedItem="{Binding Jurusan}"
+                              AutomationProperties.AutomationId="cmbJurusan"/&gt;
+
+                    &lt;TextBlock Text="Gender" Style="{StaticResource Label}"/&gt;
+                    &lt;StackPanel Orientation="Horizontal"&gt;
+                        &lt;RadioButton Content="Laki-laki" GroupName="G" IsChecked="{Binding IsLaki}" Margin="0,0,20,0"
+                                     AutomationProperties.AutomationId="rbLaki"/&gt;
+                        &lt;RadioButton Content="Perempuan" GroupName="G" IsChecked="{Binding IsPerempuan}"
+                                     AutomationProperties.AutomationId="rbPerempuan"/&gt;
+                    &lt;/StackPanel&gt;
+
+                    &lt;TextBlock Text="Email" Style="{StaticResource Label}"/&gt;
+                    &lt;TextBox Text="{Binding Email, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.AutomationId="txtEmail"/&gt;
+
+                    &lt;!-- Pesan: merah jika error, hijau jika sukses --&gt;
+                    &lt;TextBlock Text="{Binding Pesan}" Margin="0,14,0,0" TextWrapping="Wrap" FontWeight="SemiBold"
+                               AutomationProperties.AutomationId="lblPesan"&gt;
+                        &lt;TextBlock.Style&gt;
+                            &lt;Style TargetType="TextBlock"&gt;
+                                &lt;Setter Property="Foreground" Value="#16A34A"/&gt;
+                                &lt;Style.Triggers&gt;
+                                    &lt;DataTrigger Binding="{Binding PesanError}" Value="True"&gt;
+                                        &lt;Setter Property="Foreground" Value="#DC2626"/&gt;
+                                    &lt;/DataTrigger&gt;
+                                &lt;/Style.Triggers&gt;
+                            &lt;/Style&gt;
+                        &lt;/TextBlock.Style&gt;
+                    &lt;/TextBlock&gt;
+
+                    &lt;WrapPanel Margin="0,14,0,0"&gt;
+                        &lt;Button Content="Tambah" Command="{Binding TambahCommand}" Style="{StaticResource Tombol}"
+                                Background="{StaticResource Primer}" Foreground="White" AutomationProperties.AutomationId="btnTambah"/&gt;
+                        &lt;Button Content="Ubah" Command="{Binding UbahCommand}" Style="{StaticResource Tombol}"
+                                Background="#F59E0B" Foreground="White" AutomationProperties.AutomationId="btnUbah"/&gt;
+                        &lt;Button Content="Hapus" Command="{Binding HapusCommand}" Style="{StaticResource Tombol}"
+                                Background="#DC2626" Foreground="White" AutomationProperties.AutomationId="btnHapus"/&gt;
+                        &lt;Button Content="Bersihkan" Command="{Binding BersihkanCommand}" Style="{StaticResource Tombol}"
+                                Background="#E2E8F0" Foreground="#334155" Margin="0" AutomationProperties.AutomationId="btnBersihkan"/&gt;
+                    &lt;/WrapPanel&gt;
+                &lt;/StackPanel&gt;
+            &lt;/Border&gt;
+
+            &lt;!-- ===== TABEL + PENCARIAN ===== --&gt;
+            &lt;Border Grid.Column="2" Style="{StaticResource Kartu}" Padding="20"&gt;
+                &lt;Grid&gt;
+                    &lt;Grid.RowDefinitions&gt;
+                        &lt;RowDefinition Height="Auto"/&gt;
+                        &lt;RowDefinition Height="*"/&gt;
+                    &lt;/Grid.RowDefinitions&gt;
+
+                    &lt;DockPanel Grid.Row="0" Margin="0,0,0,10"&gt;
+                        &lt;TextBlock Text="🔍" VerticalAlignment="Center" FontSize="16" Margin="0,0,8,0"/&gt;
+                        &lt;TextBox Text="{Binding Cari, UpdateSourceTrigger=PropertyChanged}"
+                                 ToolTip="Cari berdasarkan NIM, nama, jurusan, atau email"
+                                 AutomationProperties.AutomationId="txtCari"/&gt;
+                    &lt;/DockPanel&gt;
+
+                    &lt;DataGrid Grid.Row="1" ItemsSource="{Binding Students}" SelectedItem="{Binding SelectedStudent}"
+                              AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False"
+                              HeadersVisibility="Column" GridLinesVisibility="Horizontal" SelectionMode="Single"
+                              HorizontalGridLinesBrush="#E2E8F0" BorderBrush="#E2E8F0" RowHeight="30"
+                              AlternatingRowBackground="#F8FAFC" AutomationProperties.AutomationId="dgStudents"&gt;
+                        &lt;DataGrid.ColumnHeaderStyle&gt;
+                            &lt;Style TargetType="DataGridColumnHeader"&gt;
+                                &lt;Setter Property="Background" Value="#EFF6FF"/&gt;
+                                &lt;Setter Property="Foreground" Value="#1E3A8A"/&gt;
+                                &lt;Setter Property="FontWeight" Value="SemiBold"/&gt;
+                                &lt;Setter Property="Padding" Value="8,6"/&gt;
+                            &lt;/Style&gt;
+                        &lt;/DataGrid.ColumnHeaderStyle&gt;
+                        &lt;DataGrid.Columns&gt;
+                            &lt;DataGridTextColumn Header="NIM" Binding="{Binding Nim}" Width="100"/&gt;
+                            &lt;DataGridTextColumn Header="Nama" Binding="{Binding Nama}" Width="*"/&gt;
+                            &lt;DataGridTextColumn Header="Jurusan" Binding="{Binding Jurusan}" Width="*"/&gt;
+                            &lt;DataGridTextColumn Header="Gender" Binding="{Binding Gender}" Width="85"/&gt;
+                            &lt;DataGridTextColumn Header="Email" Binding="{Binding Email}" Width="1.2*"/&gt;
+                        &lt;/DataGrid.Columns&gt;
+                    &lt;/DataGrid&gt;
+                &lt;/Grid&gt;
+            &lt;/Border&gt;
+        &lt;/Grid&gt;
+    &lt;/Grid&gt;
+&lt;/Window&gt;</code></pre>
+
+<h3>Views/MainWindow.xaml.cs</h3>
+<pre style="background:#1e1e1e;color:#d4d4d4;padding:12px;border-radius:6px;overflow-x:auto;font-size:13px;"><code>using System.Windows;
+using StudentManagement.ViewModels;
+
+namespace StudentManagement.Views
+{
+    // Code-behind sengaja dibuat minimal: semua logika ada di MainViewModel
+    public partial class MainWindow : Window
+    {
+        public MainWindow()
+        {
+            InitializeComponent();
+
+            // Satu-satunya hal yang dilakukan View: menyediakan dialog konfirmasi untuk ViewModel
+            if (DataContext is MainViewModel vm)
+            {
+                vm.Konfirmasi = pesan =&gt; MessageBox.Show(pesan, "Konfirmasi",
+                    MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes;
+            }
+        }
+    }
+}</code></pre>
+
+<h2>4. Jalankan dan Uji</h2>
+<pre style="background:#1e1e1e;color:#d4d4d4;padding:12px;border-radius:6px;overflow-x:auto;"><code>dotnet run</code></pre>
+<ul>
+<li>Tambah dengan form kosong → <code>Semua kolom wajib diisi!</code></li>
+<li>Email <code>budi@email</code> → <code>Format email tidak valid.</code></li>
+<li>Tambah 5 mahasiswa → tabel dan statistik bertambah.</li>
+<li>Tambah dengan NIM yang sudah ada → <code>NIM ... sudah terdaftar.</code></li>
+<li>Pilih baris, ubah jurusan, klik Ubah → data dan statistik per jurusan berubah.</li>
+<li>Ketik <code>Informatika</code> di pencarian → hanya mahasiswa Teknik Informatika yang tampil.</li>
+<li>Pilih baris, klik Hapus, pilih Yes → data hilang dan total berkurang.</li>
+</ul>
+<p>Cek langsung ke database:</p>
+<pre style="background:#1e1e1e;color:#d4d4d4;padding:12px;border-radius:6px;overflow-x:auto;"><code>sqlcmd -S localhost -E -C -Q "SELECT * FROM StudentDB.dbo.Students"</code></pre>
+
+<h2>Penjelasan Kode</h2>
+<h3>Data (ADO.NET)</h3>
+<ul>
+<li><b>Database.Inisialisasi()</b> — konek ke <code>master</code>, membuat database jika belum ada, lalu membuat tabel jika belum ada, sehingga aplikasi bisa langsung dipakai.</li>
+<li><b>Pola ADO.NET</b> — <code>SqlConnection</code> → <code>SqlCommand</code> → <code>ExecuteReader()</code> untuk <code>SELECT</code>, <code>ExecuteNonQuery()</code> untuk <code>INSERT/UPDATE/DELETE</code>, <code>ExecuteScalar()</code> untuk satu nilai. Semua dibungkus <code>using</code> agar koneksi otomatis ditutup.</li>
+<li><b>Parameter @Nim, @Nama, …</b> — input tidak pernah digabung langsung ke string SQL, sehingga aman dari SQL Injection.</li>
+<li><b>NimSudahAda(nim, abaikanId)</b> — <code>WHERE Nim = @Nim AND Id &lt;&gt; @Id</code>; saat update, data itu sendiri tidak dianggap duplikat.</li>
+<li><b>GetStatistik()</b> — <code>COUNT(*)</code> + <code>SUM(CASE WHEN Gender = ...)</code> untuk total dan gender, <code>GROUP BY Jurusan</code> untuk per jurusan.</li>
+</ul>
+<h3>ViewModel</h3>
+<ul>
+<li><b>BaseViewModel</b> — implementasi <code>INotifyPropertyChanged</code>; <code>Set(ref field, value)</code> mengubah nilai lalu memberi tahu View.</li>
+<li><b>RelayCommand</b> — implementasi <code>ICommand</code>. Tombol memakai <code>Command="{Binding TambahCommand}"</code>, bukan event Click. <code>canExecute</code> membuat tombol Ubah/Hapus otomatis nonaktif jika belum ada baris dipilih.</li>
+<li><b>MainViewModel</b> — properti form terikat two-way ke input; <code>Students</code> dan <code>StatistikJurusan</code> berupa <code>ObservableCollection</code>; setter <code>SelectedStudent</code> mengisi form; setter <code>Cari</code> langsung memuat ulang data; <code>Jalankan()</code> menjalankan operasi DB lalu memuat ulang tabel dan statistik, dengan error ditangkap <code>try/catch</code>.</li>
+<li><b>Konfirmasi</b> — <code>Func&lt;string, bool&gt;</code> yang diisi oleh View, sehingga ViewModel tidak memanggil <code>MessageBox</code> langsung dan tetap bebas dari kode UI.</li>
+</ul>
+<h3>View</h3>
+<ul>
+<li><code>&lt;Window.DataContext&gt;&lt;vm:MainViewModel/&gt;&lt;/Window.DataContext&gt;</code> menghubungkan View ke ViewModel.</li>
+<li><code>UpdateSourceTrigger=PropertyChanged</code> mengirim nilai ke ViewModel setiap ketikan.</li>
+<li><code>DataTrigger</code> mengubah warna pesan: merah saat error, hijau saat sukses.</li>
+<li><code>MainWindow.xaml.cs</code> hanya berisi <code>InitializeComponent()</code> dan penyedia dialog konfirmasi.</li>
+</ul>
+
+<h2>Ringkasan Perintah</h2>
+<pre style="background:#1e1e1e;color:#d4d4d4;padding:12px;border-radius:6px;overflow-x:auto;"><code>Start-Service MSSQLSERVER      # PowerShell Admin, jika SQL Server mati
+
+dotnet new wpf -n StudentManagement
+cd StudentManagement
+dotnet add package Microsoft.Data.SqlClient
+code .
+dotnet run</code></pre>
+
+</div>
