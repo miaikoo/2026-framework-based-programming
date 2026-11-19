@@ -1,0 +1,659 @@
+<!-- Tempel seluruh isi file ini di Blogger: New Post → ikon pensil → HTML view -->
+<div style="font-family:Segoe UI,Arial,sans-serif;line-height:1.7;color:#222;">
+
+<h1>Tugas 5 PBKK — Student Registration: Database Relasional &amp; WPF ADO.NET</h1>
+
+<p>📂 Source code lengkap: <a href="https://github.com/miaikoo/2026-framework-based-programming/tree/main/5-Student-Registration-DB" target="_blank">github.com/miaikoo/2026-framework-based-programming</a></p>
+
+<p>Laporan ini mendokumentasikan dua praktikum berurutan pada mata kuliah <b>.NET Programming with C#</b>. <b>Praktikum pertama</b> membangun database relasional <b>StudentRegistrationDB</b> pada SQL Server, sedangkan <b>praktikum kedua</b> membuat aplikasi desktop <b>WPF</b> dengan C# yang membaca data dari database tersebut menggunakan <b>ADO.NET</b> dan menampilkannya pada <b>DataGrid</b>. Studi kasus kedua praktikum adalah aplikasi <b>Student Registration</b>.</p>
+
+<h2>Praktikum 1 — Database StudentRegistrationDB</h2>
+
+<h3>Rancangan Tabel</h3>
+<ul>
+<li><b>Programs</b> — program studi. PK: <code>ProgramId</code>.</li>
+<li><b>Students</b> — data mahasiswa. PK: <code>StudentId</code>, FK: <code>ProgramId</code> → Programs.</li>
+<li><b>Courses</b> — mata kuliah. PK: <code>CourseId</code>, FK: <code>ProgramId</code> → Programs.</li>
+<li><b>Registrations</b> — pendaftaran mahasiswa ke mata kuliah. PK: <code>RegistrationId</code>, FK: <code>StudentId</code> → Students dan <code>CourseId</code> → Courses.</li>
+</ul>
+<p><b>Relasi:</b> Programs 1–N Students, Programs 1–N Courses, dan Students N–N Courses melalui tabel penghubung Registrations.</p>
+<p><i>[Sisipkan gambar ERD: db-01-erd.png]</i></p>
+
+<h3>Constraint yang Dipakai</h3>
+<ul>
+<li><b>PRIMARY KEY + IDENTITY</b> — ID unik yang bertambah otomatis.</li>
+<li><b>FOREIGN KEY</b> — mahasiswa hanya bisa memakai prodi yang ada; registrasi hanya untuk mahasiswa dan mata kuliah yang ada.</li>
+<li><b>UNIQUE</b> — NIM dan email tidak boleh ganda; kombinasi <code>(StudentId, CourseId, Semester)</code> mencegah daftar mata kuliah yang sama dua kali.</li>
+<li><b>CHECK</b> — <code>Gender IN ('L','P')</code>, <code>Credits BETWEEN 1 AND 6</code>, <code>Status IN ('Aktif','Batal')</code>.</li>
+<li><b>DEFAULT</b> — <code>RegisteredAt</code> otomatis waktu sekarang, <code>Status</code> otomatis 'Aktif'.</li>
+<li><b>ON DELETE CASCADE</b> — jika mahasiswa dihapus, data pendaftarannya ikut terhapus.</li>
+</ul>
+<p>Dibuat juga <b>view</b> <code>vw_RegistrationDetails</code> yang menggabungkan keempat tabel agar mudah dibaca aplikasi.</p>
+
+<h3>01_create_database.sql</h3>
+<pre style="background:#1e1e1e;color:#d4d4d4;padding:12px;border-radius:6px;overflow-x:auto;font-size:13px;"><code>/* =========================================================
+   PRAKTIKUM 1 — Membuat database relasional StudentRegistrationDB
+   Jalankan: sqlcmd -S localhost -E -C -i 01_create_database.sql
+   ========================================================= */
+
+-- Hapus database lama agar skrip bisa dijalankan ulang dari nol
+IF DB_ID('StudentRegistrationDB') IS NOT NULL
+BEGIN
+    ALTER DATABASE StudentRegistrationDB SET SINGLE_USER WITH ROLLBACK IMMEDIATE;
+    DROP DATABASE StudentRegistrationDB;
+END
+GO
+
+CREATE DATABASE StudentRegistrationDB;
+GO
+
+USE StudentRegistrationDB;
+GO
+
+/* ---------- 1. Programs (Program Studi) ---------- */
+CREATE TABLE Programs (
+    ProgramId   INT IDENTITY(1,1) PRIMARY KEY,
+    ProgramCode VARCHAR(10)   NOT NULL UNIQUE,
+    ProgramName NVARCHAR(100) NOT NULL,
+    Faculty     NVARCHAR(100) NOT NULL
+);
+GO
+
+/* ---------- 2. Students (Mahasiswa) ---------- */
+CREATE TABLE Students (
+    StudentId  INT IDENTITY(1,1) PRIMARY KEY,
+    Nim        VARCHAR(20)   NOT NULL UNIQUE,
+    FullName   NVARCHAR(100) NOT NULL,
+    Gender     CHAR(1)       NOT NULL CHECK (Gender IN ('L', 'P')),
+    Email      NVARCHAR(100) NOT NULL UNIQUE,
+    BirthDate  DATE          NOT NULL,
+    EntryYear  SMALLINT      NOT NULL CHECK (EntryYear BETWEEN 2000 AND 2100),
+    ProgramId  INT           NOT NULL,
+    CONSTRAINT FK_Students_Programs
+        FOREIGN KEY (ProgramId) REFERENCES Programs(ProgramId)
+);
+GO
+
+/* ---------- 3. Courses (Mata Kuliah) ---------- */
+CREATE TABLE Courses (
+    CourseId   INT IDENTITY(1,1) PRIMARY KEY,
+    CourseCode VARCHAR(10)   NOT NULL UNIQUE,
+    CourseName NVARCHAR(100) NOT NULL,
+    Credits    TINYINT       NOT NULL CHECK (Credits BETWEEN 1 AND 6),
+    ProgramId  INT           NOT NULL,
+    CONSTRAINT FK_Courses_Programs
+        FOREIGN KEY (ProgramId) REFERENCES Programs(ProgramId)
+);
+GO
+
+/* ---------- 4. Registrations (Pendaftaran mata kuliah) ----------
+   Tabel penghubung many-to-many antara Students dan Courses */
+CREATE TABLE Registrations (
+    RegistrationId INT IDENTITY(1,1) PRIMARY KEY,
+    StudentId      INT         NOT NULL,
+    CourseId       INT         NOT NULL,
+    Semester       VARCHAR(20) NOT NULL,          -- contoh: '2026/2027 Ganjil'
+    RegisteredAt   DATETIME2   NOT NULL DEFAULT SYSDATETIME(),
+    Status         VARCHAR(15) NOT NULL DEFAULT 'Aktif'
+                   CHECK (Status IN ('Aktif', 'Batal')),
+    CONSTRAINT FK_Registrations_Students
+        FOREIGN KEY (StudentId) REFERENCES Students(StudentId) ON DELETE CASCADE,
+    CONSTRAINT FK_Registrations_Courses
+        FOREIGN KEY (CourseId) REFERENCES Courses(CourseId),
+    -- Mahasiswa tidak boleh mendaftar mata kuliah yang sama dua kali di semester yang sama
+    CONSTRAINT UQ_Registrations UNIQUE (StudentId, CourseId, Semester)
+);
+GO
+
+/* ---------- 5. View gabungan untuk aplikasi ---------- */
+CREATE VIEW vw_RegistrationDetails AS
+SELECT  r.RegistrationId,
+        s.Nim,
+        s.FullName,
+        p.ProgramName,
+        c.CourseCode,
+        c.CourseName,
+        c.Credits,
+        r.Semester,
+        r.Status,
+        r.RegisteredAt
+FROM Registrations r
+JOIN Students s ON s.StudentId = r.StudentId
+JOIN Programs p ON p.ProgramId = s.ProgramId
+JOIN Courses  c ON c.CourseId  = r.CourseId;
+GO
+
+PRINT 'Database StudentRegistrationDB dan 4 tabel berhasil dibuat.';
+GO</code></pre>
+
+<h3>02_seed_data.sql</h3>
+<pre style="background:#1e1e1e;color:#d4d4d4;padding:12px;border-radius:6px;overflow-x:auto;font-size:13px;"><code>/* =========================================================
+   PRAKTIKUM 1 — Mengisi data contoh
+   Jalankan setelah 01_create_database.sql
+   ========================================================= */
+USE StudentRegistrationDB;
+GO
+
+INSERT INTO Programs (ProgramCode, ProgramName, Faculty) VALUES
+('IF', N'Teknik Informatika',       N'Fakultas Teknologi Elektro dan Informatika Cerdas'),
+('SI', N'Sistem Informasi',         N'Fakultas Teknologi Elektro dan Informatika Cerdas'),
+('TI', N'Teknologi Informasi',      N'Fakultas Teknologi Elektro dan Informatika Cerdas'),
+('SD', N'Sains Data',               N'Fakultas Sains dan Analitika Data');
+GO
+
+INSERT INTO Students (Nim, FullName, Gender, Email, BirthDate, EntryYear, ProgramId) VALUES
+('5025241001', N'Budi Santoso',     'L', 'budi.santoso@student.ac.id',   '2006-03-15', 2024, 1),
+('5025241002', N'Dewi Lestari',     'P', 'dewi.lestari@student.ac.id',   '2006-07-21', 2024, 1),
+('5025241003', N'Rizky Maulana',    'L', 'rizky.maulana@student.ac.id',  '2005-11-02', 2024, 1),
+('5026241004', N'Siti Aminah',      'P', 'siti.aminah@student.ac.id',    '2006-01-09', 2024, 2),
+('5026241005', N'Fajar Nugroho',    'L', 'fajar.nugroho@student.ac.id',  '2005-09-30', 2024, 2),
+('5027241006', N'Putri Ramadhani',  'P', 'putri.ramadhani@student.ac.id','2006-05-12', 2024, 3),
+('5027241007', N'Andi Pratama',     'L', 'andi.pratama@student.ac.id',   '2006-02-25', 2024, 3),
+('5028241008', N'Nadia Kusuma',     'P', 'nadia.kusuma@student.ac.id',   '2006-08-18', 2024, 4);
+GO
+
+INSERT INTO Courses (CourseCode, CourseName, Credits, ProgramId) VALUES
+('IF2101', N'Pemrograman Berbasis Kerangka Kerja', 3, 1),
+('IF2102', N'Basis Data',                          3, 1),
+('IF2103', N'Struktur Data',                       4, 1),
+('SI2101', N'Analisis Proses Bisnis',              3, 2),
+('SI2102', N'Sistem Enterprise',                   3, 2),
+('TI2101', N'Jaringan Komputer',                   3, 3),
+('SD2101', N'Statistika Data',                     3, 4),
+('SD2102', N'Pembelajaran Mesin',                  4, 4);
+GO
+
+-- Mahasiswa boleh mengambil mata kuliah lintas prodi (contoh: SI mengambil Basis Data)
+INSERT INTO Registrations (StudentId, CourseId, Semester, RegisteredAt, Status) VALUES
+(1, 1, '2026/2027 Ganjil', '2026-08-18 08:15', 'Aktif'),
+(1, 2, '2026/2027 Ganjil', '2026-08-18 08:17', 'Aktif'),
+(1, 3, '2026/2027 Ganjil', '2026-08-18 08:20', 'Aktif'),
+(2, 1, '2026/2027 Ganjil', '2026-08-18 09:02', 'Aktif'),
+(2, 2, '2026/2027 Ganjil', '2026-08-18 09:05', 'Aktif'),
+(3, 1, '2026/2027 Ganjil', '2026-08-19 10:11', 'Aktif'),
+(3, 3, '2026/2027 Ganjil', '2026-08-19 10:14', 'Batal'),
+(4, 4, '2026/2027 Ganjil', '2026-08-19 13:30', 'Aktif'),
+(4, 5, '2026/2027 Ganjil', '2026-08-19 13:32', 'Aktif'),
+(4, 2, '2026/2027 Ganjil', '2026-08-19 13:35', 'Aktif'),
+(5, 4, '2026/2027 Ganjil', '2026-08-20 07:45', 'Aktif'),
+(6, 6, '2026/2027 Ganjil', '2026-08-20 11:00', 'Aktif'),
+(6, 1, '2026/2027 Ganjil', '2026-08-20 11:04', 'Aktif'),
+(7, 6, '2026/2027 Ganjil', '2026-08-21 14:20', 'Aktif'),
+(8, 7, '2026/2027 Ganjil', '2026-08-21 15:10', 'Aktif'),
+(8, 8, '2026/2027 Ganjil', '2026-08-21 15:12', 'Aktif');
+GO
+
+PRINT 'Data contoh berhasil dimasukkan.';
+GO</code></pre>
+
+<h3>03_queries.sql</h3>
+<pre style="background:#1e1e1e;color:#d4d4d4;padding:12px;border-radius:6px;overflow-x:auto;font-size:13px;"><code>/* =========================================================
+   PRAKTIKUM 1 — Query pengujian relasi
+   ========================================================= */
+USE StudentRegistrationDB;
+GO
+
+-- 1. Daftar mahasiswa beserta nama program studinya (JOIN 2 tabel)
+SELECT s.Nim, s.FullName, s.Gender, p.ProgramName, s.EntryYear
+FROM Students s
+JOIN Programs p ON p.ProgramId = s.ProgramId
+ORDER BY s.Nim;
+GO
+
+-- 2. Detail pendaftaran mata kuliah (JOIN 4 tabel lewat view)
+SELECT Nim, FullName, CourseCode, CourseName, Credits, Status
+FROM vw_RegistrationDetails
+ORDER BY Nim, CourseCode;
+GO
+
+-- 3. Total SKS aktif per mahasiswa (GROUP BY + SUM)
+SELECT s.Nim, s.FullName, COUNT(*) AS JumlahMK, SUM(c.Credits) AS TotalSKS
+FROM Registrations r
+JOIN Students s ON s.StudentId = r.StudentId
+JOIN Courses  c ON c.CourseId  = r.CourseId
+WHERE r.Status = 'Aktif'
+GROUP BY s.Nim, s.FullName
+ORDER BY TotalSKS DESC, s.Nim;
+GO
+
+-- 4. Jumlah peserta per mata kuliah, termasuk yang belum ada peserta (LEFT JOIN)
+SELECT c.CourseCode, c.CourseName,
+       COUNT(r.RegistrationId) AS JumlahPeserta
+FROM Courses c
+LEFT JOIN Registrations r ON r.CourseId = c.CourseId AND r.Status = 'Aktif'
+GROUP BY c.CourseCode, c.CourseName
+ORDER BY JumlahPeserta DESC, c.CourseCode;
+GO
+
+-- 5. Uji constraint: mendaftar mata kuliah yang sama dua kali harus DITOLAK
+BEGIN TRY
+    INSERT INTO Registrations (StudentId, CourseId, Semester) VALUES (1, 1, '2026/2027 Ganjil');
+END TRY
+BEGIN CATCH
+    PRINT 'Ditolak (sesuai harapan): ' + ERROR_MESSAGE();
+END CATCH
+GO
+
+-- 6. Uji foreign key: ProgramId yang tidak ada harus DITOLAK
+BEGIN TRY
+    INSERT INTO Students (Nim, FullName, Gender, Email, BirthDate, EntryYear, ProgramId)
+    VALUES ('9999999999', N'Uji FK', 'L', 'uji@x.id', '2006-01-01', 2024, 99);
+END TRY
+BEGIN CATCH
+    PRINT 'Ditolak (sesuai harapan): ' + ERROR_MESSAGE();
+END CATCH
+GO</code></pre>
+
+<h3>Menjalankan Skrip</h3>
+<p>Pastikan SQL Server berjalan (PowerShell Run as Administrator: <code>Start-Service MSSQLSERVER</code>), lalu:</p>
+<pre style="background:#1e1e1e;color:#d4d4d4;padding:12px;border-radius:6px;overflow-x:auto;"><code>cd database
+sqlcmd -S localhost -E -C -i 01_create_database.sql
+sqlcmd -S localhost -E -C -i 02_seed_data.sql
+sqlcmd -S localhost -E -C -i 03_queries.sql</code></pre>
+<p>Skrip juga bisa dijalankan di SSMS atau Azure Data Studio.</p>
+
+<h3>Hasil Praktikum 1</h3>
+<ul>
+<li>Database, 4 tabel, dan view berhasil dibuat; 4 prodi, 8 mahasiswa, 8 mata kuliah, dan 16 registrasi berhasil dimasukkan.</li>
+<li>Query JOIN menampilkan mahasiswa beserta nama prodinya.</li>
+<li>Query GROUP BY menghitung total SKS aktif per mahasiswa (registrasi berstatus Batal tidak dihitung).</li>
+<li>Query LEFT JOIN menghitung jumlah peserta per mata kuliah.</li>
+<li>Uji constraint: mendaftar mata kuliah yang sama dua kali ditolak oleh <code>UQ_Registrations</code>, dan memakai <code>ProgramId</code> yang tidak ada ditolak oleh <code>FK_Students_Programs</code>.</li>
+</ul>
+<p><i>[Sisipkan gambar: db-02 sampai db-07]</i></p>
+
+<h2>Praktikum 2 — Aplikasi WPF + ADO.NET</h2>
+
+<h3>Fitur</h3>
+<ul>
+<li><b>4 tampilan data</b> lewat ComboBox: Mahasiswa, Registrasi Mata Kuliah, Total SKS per Mahasiswa, dan Mata Kuliah — semuanya hasil query JOIN.</li>
+<li><b>Filter program studi</b> yang isinya dibaca dari tabel Programs.</li>
+<li><b>Pencarian</b> NIM, nama, atau mata kuliah yang langsung tersaring saat mengetik.</li>
+<li><b>Kartu ringkasan</b> jumlah mahasiswa, prodi, mata kuliah, dan registrasi aktif.</li>
+<li>Tombol <b>Muat Ulang</b> dan status bar jumlah baris.</li>
+</ul>
+
+<h3>Membuat Proyek</h3>
+<pre style="background:#1e1e1e;color:#d4d4d4;padding:12px;border-radius:6px;overflow-x:auto;"><code>dotnet new wpf -n StudentRegistrationApp
+cd StudentRegistrationApp
+dotnet add package Microsoft.Data.SqlClient
+code .</code></pre>
+
+<h3>DataAccess.cs — kode ADO.NET</h3>
+<pre style="background:#1e1e1e;color:#d4d4d4;padding:12px;border-radius:6px;overflow-x:auto;font-size:13px;"><code>using System.Data;
+using Microsoft.Data.SqlClient;
+
+namespace StudentRegistrationApp
+{
+    // Semua pembacaan data dari StudentRegistrationDB menggunakan ADO.NET
+    public static class DataAccess
+    {
+        // Ganti "localhost" jika nama server berbeda, misal "localhost\SQLEXPRESS"
+        public const string ConnectionString =
+            "Server=localhost;Database=StudentRegistrationDB;Trusted_Connection=True;TrustServerCertificate=True;";
+
+        // Query untuk setiap tampilan. {0} = filter prodi, {1} = filter kata kunci
+        private static readonly Dictionary&lt;string, string&gt; Queries = new Dictionary&lt;string, string&gt;
+        {
+            ["Mahasiswa"] = @"
+                SELECT s.Nim AS [NIM], s.FullName AS [Nama],
+                       CASE s.Gender WHEN 'L' THEN 'Laki-laki' ELSE 'Perempuan' END AS [Gender],
+                       p.ProgramName AS [Program Studi], s.Email,
+                       FORMAT(s.BirthDate, 'dd/MM/yyyy') AS [Tgl Lahir], s.EntryYear AS [Angkatan]
+                FROM Students s
+                JOIN Programs p ON p.ProgramId = s.ProgramId
+                WHERE (@ProgramId = 0 OR s.ProgramId = @ProgramId)
+                  AND (s.Nim LIKE @Cari OR s.FullName LIKE @Cari OR s.Email LIKE @Cari)
+                ORDER BY s.Nim",
+
+            ["Registrasi Mata Kuliah"] = @"
+                SELECT v.Nim AS [NIM], v.FullName AS [Nama], v.ProgramName AS [Program Studi],
+                       v.CourseCode AS [Kode MK], v.CourseName AS [Mata Kuliah], v.Credits AS [SKS],
+                       v.Semester, v.Status, FORMAT(v.RegisteredAt, 'dd/MM/yyyy HH:mm') AS [Waktu Daftar]
+                FROM vw_RegistrationDetails v
+                JOIN Students s ON s.Nim = v.Nim
+                WHERE (@ProgramId = 0 OR s.ProgramId = @ProgramId)
+                  AND (v.Nim LIKE @Cari OR v.FullName LIKE @Cari OR v.CourseName LIKE @Cari OR v.CourseCode LIKE @Cari)
+                ORDER BY v.Nim, v.CourseCode",
+
+            ["Total SKS per Mahasiswa"] = @"
+                SELECT s.Nim AS [NIM], s.FullName AS [Nama], p.ProgramName AS [Program Studi],
+                       COUNT(r.RegistrationId) AS [Jumlah MK], ISNULL(SUM(c.Credits), 0) AS [Total SKS]
+                FROM Students s
+                JOIN Programs p ON p.ProgramId = s.ProgramId
+                LEFT JOIN Registrations r ON r.StudentId = s.StudentId AND r.Status = 'Aktif'
+                LEFT JOIN Courses c ON c.CourseId = r.CourseId
+                WHERE (@ProgramId = 0 OR s.ProgramId = @ProgramId)
+                  AND (s.Nim LIKE @Cari OR s.FullName LIKE @Cari)
+                GROUP BY s.Nim, s.FullName, p.ProgramName
+                ORDER BY [Total SKS] DESC, s.Nim",
+
+            ["Mata Kuliah"] = @"
+                SELECT c.CourseCode AS [Kode MK], c.CourseName AS [Mata Kuliah], c.Credits AS [SKS],
+                       p.ProgramName AS [Program Studi], COUNT(r.RegistrationId) AS [Jumlah Peserta]
+                FROM Courses c
+                JOIN Programs p ON p.ProgramId = c.ProgramId
+                LEFT JOIN Registrations r ON r.CourseId = c.CourseId AND r.Status = 'Aktif'
+                WHERE (@ProgramId = 0 OR c.ProgramId = @ProgramId)
+                  AND (c.CourseCode LIKE @Cari OR c.CourseName LIKE @Cari)
+                GROUP BY c.CourseCode, c.CourseName, c.Credits, p.ProgramName
+                ORDER BY c.CourseCode"
+        };
+
+        public static IEnumerable&lt;string&gt; DaftarTampilan =&gt; Queries.Keys;
+
+        // Mengisi DataTable lewat SqlDataAdapter -&gt; langsung bisa dipakai sebagai sumber DataGrid
+        public static DataTable Ambil(string tampilan, int programId, string kataKunci)
+        {
+            var tabel = new DataTable();
+
+            using (var conn = new SqlConnection(ConnectionString))
+            using (var cmd = new SqlCommand(Queries[tampilan], conn))
+            {
+                cmd.Parameters.AddWithValue("@ProgramId", programId);
+                cmd.Parameters.AddWithValue("@Cari", "%" + (kataKunci ?? "").Trim() + "%");
+
+                using (var adapter = new SqlDataAdapter(cmd))
+                {
+                    adapter.Fill(tabel);   // Fill membuka &amp; menutup koneksi otomatis
+                }
+            }
+
+            return tabel;
+        }
+
+        // Daftar program studi untuk ComboBox filter (pakai SqlDataReader)
+        public static List&lt;KeyValuePair&lt;int, string&gt;&gt; AmbilProgramStudi()
+        {
+            var hasil = new List&lt;KeyValuePair&lt;int, string&gt;&gt; { new KeyValuePair&lt;int, string&gt;(0, "Semua Program Studi") };
+
+            using var conn = new SqlConnection(ConnectionString);
+            using var cmd = new SqlCommand("SELECT ProgramId, ProgramName FROM Programs ORDER BY ProgramName", conn);
+            conn.Open();
+
+            using var reader = cmd.ExecuteReader();
+            while (reader.Read())
+            {
+                hasil.Add(new KeyValuePair&lt;int, string&gt;(reader.GetInt32(0), reader.GetString(1)));
+            }
+            return hasil;
+        }
+
+        // Ringkasan angka untuk kartu di atas (ExecuteScalar per query)
+        public static (int mahasiswa, int matkul, int registrasi, int prodi) AmbilRingkasan()
+        {
+            using var conn = new SqlConnection(ConnectionString);
+            conn.Open();
+
+            int Hitung(string sql) =&gt; (int)new SqlCommand(sql, conn).ExecuteScalar();
+
+            return (Hitung("SELECT COUNT(*) FROM Students"),
+                    Hitung("SELECT COUNT(*) FROM Courses"),
+                    Hitung("SELECT COUNT(*) FROM Registrations WHERE Status = 'Aktif'"),
+                    Hitung("SELECT COUNT(*) FROM Programs"));
+        }
+    }
+}</code></pre>
+
+<h3>App.xaml</h3>
+<pre style="background:#1e1e1e;color:#d4d4d4;padding:12px;border-radius:6px;overflow-x:auto;font-size:13px;"><code>&lt;Application x:Class="StudentRegistrationApp.App"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             StartupUri="MainWindow.xaml"&gt;
+    &lt;Application.Resources&gt;
+        &lt;SolidColorBrush x:Key="Primer" Color="#2563EB"/&gt;
+
+        &lt;Style x:Key="Tombol" TargetType="Button"&gt;
+            &lt;Setter Property="Padding" Value="16,7"/&gt;
+            &lt;Setter Property="FontSize" Value="14"/&gt;
+            &lt;Setter Property="FontWeight" Value="SemiBold"/&gt;
+            &lt;Setter Property="Cursor" Value="Hand"/&gt;
+            &lt;Setter Property="BorderThickness" Value="0"/&gt;
+            &lt;Setter Property="Background" Value="{StaticResource Primer}"/&gt;
+            &lt;Setter Property="Foreground" Value="White"/&gt;
+        &lt;/Style&gt;
+
+        &lt;Style TargetType="ComboBox"&gt;
+            &lt;Setter Property="Padding" Value="8,5"/&gt;
+            &lt;Setter Property="FontSize" Value="14"/&gt;
+        &lt;/Style&gt;
+
+        &lt;Style TargetType="TextBox"&gt;
+            &lt;Setter Property="Padding" Value="8,5"/&gt;
+            &lt;Setter Property="FontSize" Value="14"/&gt;
+            &lt;Setter Property="BorderBrush" Value="#CBD5E1"/&gt;
+        &lt;/Style&gt;
+    &lt;/Application.Resources&gt;
+&lt;/Application&gt;</code></pre>
+
+<h3>MainWindow.xaml</h3>
+<pre style="background:#1e1e1e;color:#d4d4d4;padding:12px;border-radius:6px;overflow-x:auto;font-size:13px;"><code>&lt;Window x:Class="StudentRegistrationApp.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Student Registration" Height="760" Width="1150"
+        WindowStartupLocation="CenterScreen" Background="#F1F5F9" FontFamily="Segoe UI"
+        Loaded="Window_Loaded"&gt;
+
+    &lt;Grid Margin="20"&gt;
+        &lt;Grid.RowDefinitions&gt;
+            &lt;RowDefinition Height="Auto"/&gt;
+            &lt;RowDefinition Height="Auto"/&gt;
+            &lt;RowDefinition Height="Auto"/&gt;
+            &lt;RowDefinition Height="*"/&gt;
+            &lt;RowDefinition Height="Auto"/&gt;
+        &lt;/Grid.RowDefinitions&gt;
+
+        &lt;!-- ===== HEADER ===== --&gt;
+        &lt;Border Grid.Row="0" Background="{StaticResource Primer}" CornerRadius="8" Padding="20,14" Margin="0,0,0,14"&gt;
+            &lt;StackPanel&gt;
+                &lt;TextBlock Text="🎓 Student Registration" FontSize="22" FontWeight="Bold" Foreground="White"/&gt;
+                &lt;TextBlock Text="Data dari database StudentRegistrationDB (SQL Server) via ADO.NET" Foreground="#DBEAFE" Margin="0,2,0,0"/&gt;
+            &lt;/StackPanel&gt;
+        &lt;/Border&gt;
+
+        &lt;!-- ===== KARTU RINGKASAN ===== --&gt;
+        &lt;UniformGrid Grid.Row="1" Columns="4" Margin="0,0,0,14"&gt;
+            &lt;UniformGrid.Resources&gt;
+                &lt;Style TargetType="Border"&gt;
+                    &lt;Setter Property="Background" Value="White"/&gt;
+                    &lt;Setter Property="CornerRadius" Value="8"/&gt;
+                    &lt;Setter Property="Padding" Value="16,10"/&gt;
+                    &lt;Setter Property="BorderBrush" Value="#E2E8F0"/&gt;
+                    &lt;Setter Property="BorderThickness" Value="1"/&gt;
+                    &lt;Setter Property="Margin" Value="0,0,12,0"/&gt;
+                &lt;/Style&gt;
+            &lt;/UniformGrid.Resources&gt;
+            &lt;Border&gt;
+                &lt;StackPanel&gt;
+                    &lt;TextBlock Text="Mahasiswa" Foreground="#64748B"/&gt;
+                    &lt;TextBlock x:Name="lblMahasiswa" Text="-" FontSize="26" FontWeight="Bold" Foreground="#2563EB"/&gt;
+                &lt;/StackPanel&gt;
+            &lt;/Border&gt;
+            &lt;Border&gt;
+                &lt;StackPanel&gt;
+                    &lt;TextBlock Text="Program Studi" Foreground="#64748B"/&gt;
+                    &lt;TextBlock x:Name="lblProdi" Text="-" FontSize="26" FontWeight="Bold" Foreground="#7C3AED"/&gt;
+                &lt;/StackPanel&gt;
+            &lt;/Border&gt;
+            &lt;Border&gt;
+                &lt;StackPanel&gt;
+                    &lt;TextBlock Text="Mata Kuliah" Foreground="#64748B"/&gt;
+                    &lt;TextBlock x:Name="lblMatkul" Text="-" FontSize="26" FontWeight="Bold" Foreground="#0891B2"/&gt;
+                &lt;/StackPanel&gt;
+            &lt;/Border&gt;
+            &lt;Border Margin="0"&gt;
+                &lt;StackPanel&gt;
+                    &lt;TextBlock Text="Registrasi Aktif" Foreground="#64748B"/&gt;
+                    &lt;TextBlock x:Name="lblRegistrasi" Text="-" FontSize="26" FontWeight="Bold" Foreground="#16A34A"/&gt;
+                &lt;/StackPanel&gt;
+            &lt;/Border&gt;
+        &lt;/UniformGrid&gt;
+
+        &lt;!-- ===== FILTER ===== --&gt;
+        &lt;Border Grid.Row="2" Background="White" CornerRadius="8" Padding="16,12" BorderBrush="#E2E8F0" BorderThickness="1" Margin="0,0,0,14"&gt;
+            &lt;Grid&gt;
+                &lt;Grid.ColumnDefinitions&gt;
+                    &lt;ColumnDefinition Width="Auto"/&gt;
+                    &lt;ColumnDefinition Width="230"/&gt;
+                    &lt;ColumnDefinition Width="Auto"/&gt;
+                    &lt;ColumnDefinition Width="210"/&gt;
+                    &lt;ColumnDefinition Width="Auto"/&gt;
+                    &lt;ColumnDefinition Width="*"/&gt;
+                    &lt;ColumnDefinition Width="Auto"/&gt;
+                &lt;/Grid.ColumnDefinitions&gt;
+
+                &lt;TextBlock Grid.Column="0" Text="Tampilkan" VerticalAlignment="Center" FontWeight="SemiBold" Margin="0,0,8,0"/&gt;
+                &lt;ComboBox Grid.Column="1" x:Name="cmbTampilan" SelectionChanged="Filter_Changed"
+                          AutomationProperties.AutomationId="cmbTampilan"/&gt;
+
+                &lt;TextBlock Grid.Column="2" Text="Prodi" VerticalAlignment="Center" FontWeight="SemiBold" Margin="16,0,8,0"/&gt;
+                &lt;ComboBox Grid.Column="3" x:Name="cmbProdi" DisplayMemberPath="Value" SelectedValuePath="Key"
+                          SelectionChanged="Filter_Changed" AutomationProperties.AutomationId="cmbProdi"/&gt;
+
+                &lt;TextBlock Grid.Column="4" Text="🔍" VerticalAlignment="Center" FontSize="15" Margin="16,0,8,0"/&gt;
+                &lt;TextBox Grid.Column="5" x:Name="txtCari" TextChanged="Filter_Changed"
+                         ToolTip="Cari NIM, nama, atau mata kuliah" AutomationProperties.AutomationId="txtCari"/&gt;
+
+                &lt;Button Grid.Column="6" Content="⟳ Muat Ulang" Style="{StaticResource Tombol}" Margin="12,0,0,0"
+                        Click="BtnMuatUlang_Click" AutomationProperties.AutomationId="btnMuatUlang"/&gt;
+            &lt;/Grid&gt;
+        &lt;/Border&gt;
+
+        &lt;!-- ===== DATAGRID ===== --&gt;
+        &lt;Border Grid.Row="3" Background="White" CornerRadius="8" Padding="16" BorderBrush="#E2E8F0" BorderThickness="1"&gt;
+            &lt;DataGrid x:Name="dgData" AutoGenerateColumns="True" IsReadOnly="True" CanUserAddRows="False"
+                      HeadersVisibility="Column" GridLinesVisibility="Horizontal" HorizontalGridLinesBrush="#E2E8F0"
+                      BorderBrush="#E2E8F0" RowHeight="30" AlternatingRowBackground="#F8FAFC"
+                      ColumnWidth="Auto" AutomationProperties.AutomationId="dgData"&gt;
+                &lt;DataGrid.ColumnHeaderStyle&gt;
+                    &lt;Style TargetType="DataGridColumnHeader"&gt;
+                        &lt;Setter Property="Background" Value="#EFF6FF"/&gt;
+                        &lt;Setter Property="Foreground" Value="#1E3A8A"/&gt;
+                        &lt;Setter Property="FontWeight" Value="SemiBold"/&gt;
+                        &lt;Setter Property="Padding" Value="10,7"/&gt;
+                    &lt;/Style&gt;
+                &lt;/DataGrid.ColumnHeaderStyle&gt;
+                &lt;DataGrid.CellStyle&gt;
+                    &lt;Style TargetType="DataGridCell"&gt;
+                        &lt;Setter Property="Padding" Value="10,0"/&gt;
+                        &lt;Setter Property="BorderThickness" Value="0"/&gt;
+                        &lt;Setter Property="Template"&gt;
+                            &lt;Setter.Value&gt;
+                                &lt;ControlTemplate TargetType="DataGridCell"&gt;
+                                    &lt;Border Padding="{TemplateBinding Padding}" Background="{TemplateBinding Background}"&gt;
+                                        &lt;ContentPresenter VerticalAlignment="Center"/&gt;
+                                    &lt;/Border&gt;
+                                &lt;/ControlTemplate&gt;
+                            &lt;/Setter.Value&gt;
+                        &lt;/Setter&gt;
+                    &lt;/Style&gt;
+                &lt;/DataGrid.CellStyle&gt;
+            &lt;/DataGrid&gt;
+        &lt;/Border&gt;
+
+        &lt;!-- ===== STATUS BAR ===== --&gt;
+        &lt;TextBlock Grid.Row="4" x:Name="lblStatus" Margin="4,10,0,0" Foreground="#64748B"
+                   AutomationProperties.AutomationId="lblStatus"/&gt;
+    &lt;/Grid&gt;
+&lt;/Window&gt;</code></pre>
+
+<h3>MainWindow.xaml.cs</h3>
+<pre style="background:#1e1e1e;color:#d4d4d4;padding:12px;border-radius:6px;overflow-x:auto;font-size:13px;"><code>using System.Windows;
+using System.Windows.Media;
+
+namespace StudentRegistrationApp
+{
+    public partial class MainWindow : Window
+    {
+        private bool siap;   // mencegah query berjalan saat ComboBox masih diisi
+
+        public MainWindow()
+        {
+            InitializeComponent();
+        }
+
+        private void Window_Loaded(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                cmbTampilan.ItemsSource = DataAccess.DaftarTampilan;
+                cmbTampilan.SelectedIndex = 0;
+
+                cmbProdi.ItemsSource = DataAccess.AmbilProgramStudi();
+                cmbProdi.SelectedIndex = 0;
+
+                siap = true;
+                MuatData();
+            }
+            catch (Exception ex)
+            {
+                TampilkanError("Gagal terhubung ke database: " + ex.Message);
+            }
+        }
+
+        // Dipanggil setiap kali tampilan, prodi, atau kata kunci berubah
+        private void Filter_Changed(object sender, EventArgs e)
+        {
+            if (siap) MuatData();
+        }
+
+        private void BtnMuatUlang_Click(object sender, RoutedEventArgs e)
+        {
+            MuatData();
+        }
+
+        private void MuatData()
+        {
+            try
+            {
+                string tampilan = (string)cmbTampilan.SelectedItem;
+                int programId = (int)(cmbProdi.SelectedValue ?? 0);
+
+                var tabel = DataAccess.Ambil(tampilan, programId, txtCari.Text);
+                dgData.ItemsSource = tabel.DefaultView;   // DataTable -&gt; DataGrid
+
+                var r = DataAccess.AmbilRingkasan();
+                lblMahasiswa.Text = r.mahasiswa.ToString();
+                lblProdi.Text = r.prodi.ToString();
+                lblMatkul.Text = r.matkul.ToString();
+                lblRegistrasi.Text = r.registrasi.ToString();
+
+                lblStatus.Foreground = new SolidColorBrush(Color.FromRgb(0x64, 0x74, 0x8B));
+                lblStatus.Text = $"{tabel.Rows.Count} baris ditampilkan · {tampilan} · dimuat {DateTime.Now:HH:mm:ss}";
+            }
+            catch (Exception ex)
+            {
+                TampilkanError("Gagal memuat data: " + ex.Message);
+            }
+        }
+
+        private void TampilkanError(string pesan)
+        {
+            dgData.ItemsSource = null;
+            lblStatus.Foreground = Brushes.Crimson;
+            lblStatus.Text = pesan;
+        }
+    }
+}</code></pre>
+
+<h3>Menjalankan</h3>
+<pre style="background:#1e1e1e;color:#d4d4d4;padding:12px;border-radius:6px;overflow-x:auto;"><code>dotnet run</code></pre>
+<p><i>[Sisipkan gambar: app-01 sampai app-06]</i></p>
+
+<h3>Penjelasan Kode</h3>
+<ul>
+<li><b>SqlDataAdapter.Fill(DataTable)</b> — dipakai untuk mengisi DataGrid. <code>DataTable</code> langsung dijadikan <code>ItemsSource</code> lewat <code>.DefaultView</code>, dan kolom DataGrid dibuat otomatis dari hasil query.</li>
+<li><b>SqlDataReader</b> — dipakai untuk ComboBox program studi; membaca baris satu per satu, ringan untuk data kecil.</li>
+<li><b>ExecuteScalar()</b> — dipakai untuk kartu ringkasan yang hanya butuh satu angka (<code>COUNT(*)</code>).</li>
+<li><b>Connection string</b> memakai <code>Trusted_Connection=True</code>, artinya login dengan akun Windows tanpa password.</li>
+<li><b>Query dalam Dictionary</b> — nama tampilan dipetakan ke query SQL-nya, sehingga menambah tampilan baru cukup menambah satu entri.</li>
+<li><b>Alias kolom</b> seperti <code>AS [Program Studi]</code> langsung menjadi judul kolom DataGrid karena <code>AutoGenerateColumns="True"</code>.</li>
+<li><b>Parameter @ProgramId dan @Cari</b> — filter dikirim sebagai parameter sehingga aman dari SQL Injection; <code>@ProgramId = 0</code> berarti semua prodi.</li>
+<li><b>Filter_Changed</b> dipasang ke ComboBox dan TextBox sehingga setiap perubahan filter langsung menjalankan query ulang. Flag <code>siap</code> mencegah query berjalan saat ComboBox masih diisi.</li>
+<li>Semua pembacaan dibungkus <code>try/catch</code>; jika database tidak bisa dihubungi, pesan merah muncul di status bar dan aplikasi tidak crash.</li>
+</ul>
+
+<h2>Kesimpulan</h2>
+<p>Praktikum 1 menghasilkan database <b>StudentRegistrationDB</b> dengan 4 tabel yang saling berelasi melalui primary key dan foreign key, dilengkapi constraint untuk menjaga konsistensi data. Praktikum 2 membuktikan bahwa aplikasi WPF dapat membaca data relasional tersebut menggunakan ADO.NET (<code>SqlConnection</code>, <code>SqlCommand</code>, <code>SqlDataAdapter</code>, <code>SqlDataReader</code>) dan menampilkannya pada DataGrid lengkap dengan filter dan pencarian.</p>
+
+</div>
