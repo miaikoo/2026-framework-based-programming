@@ -1,0 +1,717 @@
+<!-- Tempel seluruh isi file ini di Blogger: New Post → ikon pensil → HTML view -->
+<div style="font-family:Segoe UI,Arial,sans-serif;line-height:1.7;color:#222;">
+
+<h1>Tugas 8 PBKK — Landing Page E-Commerce ShopEase dengan CodeIgniter 3</h1>
+
+<p>📂 Source code lengkap: <a href="https://github.com/miaikoo/2026-framework-based-programming/tree/main/8-ShopEase-Landing" target="_blank">github.com/miaikoo/2026-framework-based-programming</a></p>
+
+<p>Pada tugas ini saya membuat <b>landing page toko online ShopEase</b> menggunakan <b>CodeIgniter 3.1.13</b> dengan memodifikasi <b>routing</b>, <b>controller</b>, dan <b>view</b>. ShopEase mengikuti studi kasus jurnal <i>"Website E-Commerce Menggunakan Model View Controller (MVC) dengan Framework CodeIgniter — Studi Kasus: Toko Miniatur"</i> (Jurnal Ilmiah DASI Vol. 16 No. 1, 2015), yaitu toko miniatur di Yogyakarta yang beralih dari penjualan konvensional ke toko online.</p>
+
+<p><i>[Sisipkan gambar: s8-02-hero.png]</i></p>
+
+<h2>Dari Studi Kasus ke Landing Page</h2>
+<table style="border-collapse:collapse;width:100%;font-size:14px;" border="1" cellpadding="6">
+<tr style="background:#eef2f6"><th>Isi jurnal</th><th>Diterapkan di ShopEase</th></tr>
+<tr><td>Toko miniatur di Bantul, Yogyakarta yang masih berjualan offline</td><td>Katalog 14 miniatur dalam 5 kategori, dikirim dari Bantul</td></tr>
+<tr><td>Analisis PIECES: transaksi 24 jam, pembeli tidak perlu datang ke toko</td><td>Poin di hero: pesanan 24 jam, konfirmasi bayar online, kirim ke seluruh Indonesia</td></tr>
+<tr><td>Informasi diskon periode tertentu tampil real-time</td><td>Section promo dengan hitung mundur; harga diskon otomatis di semua halaman</td></tr>
+<tr><td>Fitur shopping cart</td><td>Keranjang berbasis session, jumlah barang tampil di navbar</td></tr>
+<tr><td>Produk terbaru &amp; produk terlaris</td><td>Section "Baru masuk etalase" dan "Paling banyak dibeli"</td></tr>
+<tr><td>Alur: keranjang → jasa pengiriman → metode pembayaran → konfirmasi → selesai</td><td>Section "Dari keranjang sampai rumah" (5 tahap)</td></tr>
+<tr><td>Data kurir, bank, CS, testimoni</td><td>Section layanan dan "Kata pelanggan"</td></tr>
+<tr><td>Pengguna: pengunjung, pelanggan, administrator</td><td>Dijelaskan di halaman Tentang</td></tr>
+</table>
+
+<h2>Cara Menjalankan</h2>
+<ol>
+<li>Start Apache di XAMPP (tidak perlu database; data katalog ada di model).</li>
+<li>Letakkan folder di <code>htdocs</code>, lalu buka <code>http://localhost/pbkk8/shopease/</code>.</li>
+</ol>
+<p>Karena CodeIgniter 3.1.13 dirilis sebelum PHP 8.2, pesan <i>Deprecated</i> di PHP 8.5 disembunyikan lewat <code>error_reporting(E_ALL &amp; ~E_DEPRECATED &amp; ~E_USER_DEPRECATED)</code> di <code>index.php</code>. Konfigurasi lain: <code>base_url</code> otomatis, <code>index_page</code> kosong + <code>.htaccess</code>, CSRF aktif, dan bahasa Indonesia.</p>
+
+<h2>1. Modifikasi Routing</h2>
+<pre style="background:#1e1e1e;color:#d4d4d4;padding:12px;border-radius:6px;overflow-x:auto;font-size:13px;"><code>// ---------------------------------------------------------------
+// Routing ShopEase
+// ---------------------------------------------------------------
+// Halaman utama (landing page)
+$route['default_controller'] = 'home';
+
+// Katalog: /kategori/kereta, /cari?q=vespa, /produk/lokomotif-uap
+$route['kategori/(:any)'] = 'home/kategori/$1';
+$route['cari']            = 'home/cari';
+$route['produk/(:any)']   = 'produk/detail/$1';
+
+// Newsletter (form POST di landing page)
+$route['langganan'] = 'home/langganan';
+
+// Keranjang belanja (shopping cart)
+$route['keranjang']          = 'keranjang/index';
+$route['keranjang/tambah']   = 'keranjang/tambah';
+$route['keranjang/hapus']    = 'keranjang/hapus';
+
+// Halaman statis: satu controller untuk beberapa URL
+$route['(tentang|cara-belanja|kontak)'] = 'halaman/tampil/$1';
+
+// Halaman 404 buatan sendiri
+$route['404_override'] = 'halaman/tidak_ditemukan';
+$route['translate_uri_dashes'] = FALSE;</code></pre>
+<ul>
+<li><code>/kategori/kereta</code> → <code>Home::kategori('kereta')</code>: wildcard <code>(:any)</code> diteruskan sebagai parameter.</li>
+<li><code>/produk/kapal-pinisi</code> → <code>Produk::detail('kapal-pinisi')</code>: URL memakai slug, bukan ID.</li>
+<li><code>(tentang|cara-belanja|kontak)</code>: <b>satu route regex</b> untuk tiga halaman sekaligus.</li>
+<li><code>404_override</code>: URL yang tidak dikenal menampilkan halaman 404 bergaya ShopEase.</li>
+</ul>
+
+<h2>2. Modifikasi Controller</h2>
+<h3>core/MY_Controller.php — data global, layout, dan 404</h3>
+<pre style="background:#1e1e1e;color:#d4d4d4;padding:12px;border-radius:6px;overflow-x:auto;font-size:13px;"><code>&lt;?php
+defined('BASEPATH') OR exit('No direct script access allowed');
+
+/**
+ * Controller dasar ShopEase.
+ * Menyiapkan data yang tampil di setiap halaman (menu kategori, jumlah isi keranjang)
+ * dan method render() untuk membungkus view ke dalam layout utama.
+ */
+class MY_Controller extends CI_Controller
+{
+    public function __construct()
+    {
+        parent::__construct();
+        $this-&gt;load-&gt;model('katalog_model');
+        $this-&gt;load-&gt;vars(array(
+            'menu_kategori'   =&gt; $this-&gt;katalog_model-&gt;kategori(),
+            'jumlah_keranjang' =&gt; array_sum((array) $this-&gt;session-&gt;userdata('keranjang')),
+            'layanan'         =&gt; $this-&gt;katalog_model-&gt;layanan(),
+        ));
+    }
+
+    /**
+     * @param string $view  view isi halaman
+     * @param array  $data  data untuk view; 'title' dipakai di &lt;title&gt;
+     */
+    protected function render($view, array $data = array())
+    {
+        $data['content'] = $this-&gt;load-&gt;view($view, $data, TRUE);
+        $this-&gt;load-&gt;view('layouts/main', $data);
+    }
+
+    /**
+     * Tampilkan halaman 404 ShopEase lalu hentikan proses.
+     * show_404() bawaan tidak melewati $route['404_override'], jadi dipakai method ini
+     * agar produk/kategori yang tidak ada tetap memakai tampilan yang sama.
+     */
+    protected function tidak_ada()
+    {
+        $this-&gt;output-&gt;set_status_header(404);
+        $this-&gt;render('halaman/tidak_ditemukan', array(
+            'title' =&gt; 'Halaman tidak ditemukan — ShopEase',
+            'saran' =&gt; $this-&gt;katalog_model-&gt;terlaris(3),
+        ));
+        $this-&gt;output-&gt;_display();
+        exit;
+    }
+}</code></pre>
+
+<h3>controllers/Home.php — landing page, kategori, pencarian, newsletter</h3>
+<pre style="background:#1e1e1e;color:#d4d4d4;padding:12px;border-radius:6px;overflow-x:auto;font-size:13px;"><code>&lt;?php
+defined('BASEPATH') OR exit('No direct script access allowed');
+
+/**
+ * Landing page dan penjelajahan katalog.
+ *   /                  index()      landing page
+ *   /kategori/kereta   kategori()   produk per kategori
+ *   /cari?q=...        cari()       hasil pencarian
+ *   /langganan         langganan()  (POST) daftar newsletter promo
+ */
+class Home extends MY_Controller
+{
+    public function index()
+    {
+        $this-&gt;render('home/landing', array(
+            'title'     =&gt; 'ShopEase — Toko Miniatur &amp; Koleksi',
+            'unggulan'  =&gt; $this-&gt;katalog_model-&gt;by_slug('lokomotif-uap'),
+            'pajangan'  =&gt; array(
+                $this-&gt;katalog_model-&gt;by_slug('vespa-klasik'),
+                $this-&gt;katalog_model-&gt;by_slug('kapal-pinisi'),
+                $this-&gt;katalog_model-&gt;by_slug('becak-jogja'),
+            ),
+            'terbaru'   =&gt; $this-&gt;katalog_model-&gt;terbaru(4),
+            'terlaris'  =&gt; $this-&gt;katalog_model-&gt;terlaris(5),
+            'promo'     =&gt; $this-&gt;katalog_model-&gt;promo_aktif(),
+            'langkah'   =&gt; $this-&gt;katalog_model-&gt;langkah_belanja(),
+            'testimoni' =&gt; $this-&gt;katalog_model-&gt;testimoni(),
+            'total_produk' =&gt; count($this-&gt;katalog_model-&gt;semua()),
+        ));
+    }
+
+    public function kategori($slug = NULL)
+    {
+        $kategori = $this-&gt;katalog_model-&gt;kategori_by_slug($slug);
+        if ( ! $kategori)
+        {
+            $this-&gt;tidak_ada();
+        }
+
+        $urut = $this-&gt;input-&gt;get('urut', TRUE);
+        $produk = $this-&gt;katalog_model-&gt;by_kategori($slug);
+        $produk = $this-&gt;_urutkan($produk, $urut);
+
+        $this-&gt;render('home/daftar', array(
+            'title'    =&gt; $kategori-&gt;nama.' — ShopEase',
+            'judul'    =&gt; $kategori-&gt;nama,
+            'subjudul' =&gt; $kategori-&gt;ket,
+            'produk'   =&gt; $produk,
+            'aktif'    =&gt; $slug,
+            'urut'     =&gt; $urut,
+        ));
+    }
+
+    public function cari()
+    {
+        $q = trim((string) $this-&gt;input-&gt;get('q', TRUE));
+        $produk = $this-&gt;katalog_model-&gt;cari($q);
+
+        $this-&gt;render('home/daftar', array(
+            'title'    =&gt; 'Cari "'.$q.'" — ShopEase',
+            'judul'    =&gt; $q === '' ? 'Cari miniatur' : 'Hasil untuk "'.$q.'"',
+            'subjudul' =&gt; $q === '' ? 'Ketik nama miniatur, skala, atau bahan.' : count($produk).' miniatur ditemukan.',
+            'produk'   =&gt; $produk,
+            'aktif'    =&gt; NULL,
+            'urut'     =&gt; NULL,
+            'q'        =&gt; $q,
+        ));
+    }
+
+    public function langganan()
+    {
+        if ($this-&gt;input-&gt;method() !== 'post')
+        {
+            redirect('');
+        }
+
+        $this-&gt;form_validation-&gt;set_rules('email', 'Email', 'trim|required|valid_email|max_length[100]');
+        if ($this-&gt;form_validation-&gt;run())
+        {
+            // Belum ada database: email cukup diingat di session agar form berubah jadi pesan terima kasih.
+            $this-&gt;session-&gt;set_userdata('pelanggan_newsletter', $this-&gt;input-&gt;post('email', TRUE));
+            $this-&gt;session-&gt;set_flashdata('newsletter', array('ok' =&gt; TRUE, 'pesan' =&gt; 'Terdaftar. Info diskon berikutnya dikirim ke '.$this-&gt;input-&gt;post('email', TRUE).'.'));
+        }
+        else
+        {
+            $this-&gt;session-&gt;set_flashdata('newsletter', array('ok' =&gt; FALSE, 'pesan' =&gt; strip_tags(form_error('email'))));
+        }
+        redirect('#newsletter');
+    }
+
+    /** urut: murah | mahal | terlaris | (default) terbaru */
+    private function _urutkan(array $produk, $urut)
+    {
+        $cmp = array(
+            'murah'    =&gt; function ($a, $b) { return $a-&gt;harga_akhir - $b-&gt;harga_akhir; },
+            'mahal'    =&gt; function ($a, $b) { return $b-&gt;harga_akhir - $a-&gt;harga_akhir; },
+            'terlaris' =&gt; function ($a, $b) { return $b-&gt;terjual - $a-&gt;terjual; },
+        );
+        usort($produk, isset($cmp[$urut]) ? $cmp[$urut] : function ($a, $b) { return strcmp($b-&gt;masuk, $a-&gt;masuk); });
+        return $produk;
+    }
+}</code></pre>
+
+<h3>controllers/Produk.php</h3>
+<pre style="background:#1e1e1e;color:#d4d4d4;padding:12px;border-radius:6px;overflow-x:auto;font-size:13px;"><code>&lt;?php
+defined('BASEPATH') OR exit('No direct script access allowed');
+
+/** /produk/&lt;slug&gt; → detail($slug) (lihat config/routes.php) */
+class Produk extends MY_Controller
+{
+    public function detail($slug = NULL)
+    {
+        $produk = $this-&gt;katalog_model-&gt;by_slug((string) $slug);
+        if ( ! $produk)
+        {
+            $this-&gt;tidak_ada();
+        }
+
+        $this-&gt;render('produk/detail', array(
+            'title'  =&gt; $produk-&gt;nama.' — ShopEase',
+            'p'      =&gt; $produk,
+            'serupa' =&gt; $this-&gt;katalog_model-&gt;serupa($produk),
+        ));
+    }
+}</code></pre>
+
+<h3>controllers/Keranjang.php — shopping cart di session</h3>
+<pre style="background:#1e1e1e;color:#d4d4d4;padding:12px;border-radius:6px;overflow-x:auto;font-size:13px;"><code>&lt;?php
+defined('BASEPATH') OR exit('No direct script access allowed');
+
+/**
+ * Keranjang belanja sederhana di session: array(slug =&gt; jumlah).
+ *   GET  /keranjang          lihat isi
+ *   POST /keranjang/tambah   tambah produk
+ *   POST /keranjang/hapus    hapus satu produk
+ */
+class Keranjang extends MY_Controller
+{
+    const MAKS = 10;
+
+    public function index()
+    {
+        $isi = array();
+        $total = 0;
+        foreach ($this-&gt;_isi() as $slug =&gt; $qty)
+        {
+            $p = $this-&gt;katalog_model-&gt;by_slug($slug);
+            if ( ! $p) continue;
+            $isi[] = (object) array('p' =&gt; $p, 'qty' =&gt; $qty, 'subtotal' =&gt; $p-&gt;harga_akhir * $qty);
+            $total += $p-&gt;harga_akhir * $qty;
+        }
+
+        $this-&gt;render('keranjang/index', array(
+            'title' =&gt; 'Keranjang — ShopEase',
+            'isi'   =&gt; $isi,
+            'total' =&gt; $total,
+            'hemat' =&gt; array_sum(array_map(function ($i) { return ($i-&gt;p-&gt;harga - $i-&gt;p-&gt;harga_akhir) * $i-&gt;qty; }, $isi)),
+        ));
+    }
+
+    public function tambah()
+    {
+        $this-&gt;_wajib_post();
+        $slug = (string) $this-&gt;input-&gt;post('slug', TRUE);
+        $produk = $this-&gt;katalog_model-&gt;by_slug($slug);
+        if ( ! $produk)
+        {
+            $this-&gt;tidak_ada();
+        }
+
+        $isi = $this-&gt;_isi();
+        $baru = min(self::MAKS, $produk-&gt;stok, (isset($isi[$slug]) ? $isi[$slug] : 0) + max(1, (int) $this-&gt;input-&gt;post('qty')));
+        $isi[$slug] = $baru;
+        $this-&gt;session-&gt;set_userdata('keranjang', $isi);
+        $this-&gt;session-&gt;set_flashdata('notif', $produk-&gt;nama.' masuk keranjang ('.$baru.' pcs).');
+
+        // kartu produk mengirim field "kembali" (URI halaman asal; string kosong = beranda).
+        // Form detail produk tidak mengirimnya, sehingga diarahkan ke keranjang.
+        $kembali = $this-&gt;input-&gt;post('kembali');
+        redirect($kembali !== NULL &amp;&amp; strpos($kembali, '//') === FALSE ? $kembali : 'keranjang');
+    }
+
+    public function hapus()
+    {
+        $this-&gt;_wajib_post();
+        $isi = $this-&gt;_isi();
+        unset($isi[(string) $this-&gt;input-&gt;post('slug')]);
+        $this-&gt;session-&gt;set_userdata('keranjang', $isi);
+        redirect('keranjang');
+    }
+
+    private function _isi()
+    {
+        return (array) $this-&gt;session-&gt;userdata('keranjang');
+    }
+
+    private function _wajib_post()
+    {
+        if ($this-&gt;input-&gt;method() !== 'post')
+        {
+            show_error('Metode tidak diizinkan.', 405);
+        }
+    }
+}</code></pre>
+
+<h3>controllers/Halaman.php — halaman statis &amp; 404</h3>
+<pre style="background:#1e1e1e;color:#d4d4d4;padding:12px;border-radius:6px;overflow-x:auto;font-size:13px;"><code>&lt;?php
+defined('BASEPATH') OR exit('No direct script access allowed');
+
+/**
+ * Halaman informasi. Tiga URL (/tentang, /cara-belanja, /kontak) diarahkan ke
+ * satu method tampil($slug) lewat satu baris route regex.
+ * tidak_ditemukan() dipakai sebagai $route['404_override'].
+ */
+class Halaman extends MY_Controller
+{
+    public function tampil($slug = 'tentang')
+    {
+        $judul = array('tentang' =&gt; 'Tentang ShopEase', 'cara-belanja' =&gt; 'Cara belanja', 'kontak' =&gt; 'Hubungi kami');
+        if ( ! isset($judul[$slug]))
+        {
+            $this-&gt;tidak_ada();
+        }
+
+        $this-&gt;render('halaman/'.str_replace('-', '_', $slug), array(
+            'title'   =&gt; $judul[$slug].' — ShopEase',
+            'judul'   =&gt; $judul[$slug],
+            'langkah' =&gt; $this-&gt;katalog_model-&gt;langkah_belanja(),
+        ));
+    }
+
+    public function tidak_ditemukan()
+    {
+        $this-&gt;tidak_ada();
+    }
+}</code></pre>
+
+<h3>models/Katalog_model.php — sumber data katalog</h3>
+<p>Data disimpan sebagai array agar tidak perlu database. Controller dan view hanya memanggil method model, jadi bila nanti dipindah ke MySQL cukup isi method ini yang diganti.</p>
+<pre style="background:#1e1e1e;color:#d4d4d4;padding:12px;border-radius:6px;overflow-x:auto;font-size:13px;"><code>&lt;?php
+defined('BASEPATH') OR exit('No direct script access allowed');
+
+/**
+ * Sumber data katalog ShopEase.
+ * Untuk tugas landing page ini data disimpan sebagai array agar tidak perlu database.
+ * Controller dan view hanya memanggil method di bawah, jadi kalau nanti data dipindah
+ * ke MySQL cukup isi method-method ini yang diganti dengan Query Builder.
+ */
+class Katalog_model extends CI_Model
+{
+    private $kategori = array(
+        'kereta'      =&gt; array('nama' =&gt; 'Kereta api',             'ikon' =&gt; '🚂', 'ket' =&gt; 'Lokomotif, gerbong, dan trem skala HO'),
+        'darat'       =&gt; array('nama' =&gt; 'Kendaraan darat',        'ikon' =&gt; '🚗', 'ket' =&gt; 'Mobil, motor, dan bus diecast'),
+        'udara'       =&gt; array('nama' =&gt; 'Pesawat &amp; helikopter',   'ikon' =&gt; '✈️', 'ket' =&gt; 'Replika maskapai dan helikopter'),
+        'laut'        =&gt; array('nama' =&gt; 'Kapal',                  'ikon' =&gt; '⛵', 'ket' =&gt; 'Kapal layar kayu hingga kapal pesiar'),
+        'tradisional' =&gt; array('nama' =&gt; 'Kendaraan tradisional',  'ikon' =&gt; '🛺', 'ket' =&gt; 'Becak, ontel, dan kendaraan desa'),
+    );
+
+    private $produk = array(
+        array('slug' =&gt; 'lokomotif-uap',  'nama' =&gt; 'Lokomotif Uap C28',            'kategori' =&gt; 'kereta',      'skala' =&gt; '1:87',  'harga' =&gt; 425000, 'stok' =&gt; 6,  'terjual' =&gt; 41, 'masuk' =&gt; '2026-10-02', 'bahan' =&gt; 'Logam cor &amp; plastik ABS', 'deskripsi' =&gt; 'Replika lokomotif uap dengan detail cerobong, roda penggerak, dan tender batu bara. Kompatibel dengan rel skala HO.'),
+        array('slug' =&gt; 'kereta-argo',    'nama' =&gt; 'Rangkaian Kereta Eksekutif',   'kategori' =&gt; 'kereta',      'skala' =&gt; '1:87',  'harga' =&gt; 680000, 'stok' =&gt; 4,  'terjual' =&gt; 23, 'masuk' =&gt; '2026-11-14', 'bahan' =&gt; 'Plastik ABS',             'deskripsi' =&gt; 'Satu lokomotif dan tiga gerbong eksekutif dengan interior kursi. Bisa disambung dengan rangkaian lain.'),
+        array('slug' =&gt; 'trem-klasik',    'nama' =&gt; 'Trem Batavia 1920',            'kategori' =&gt; 'kereta',      'skala' =&gt; '1:76',  'harga' =&gt; 310000, 'stok' =&gt; 9,  'terjual' =&gt; 12, 'masuk' =&gt; '2026-11-10', 'bahan' =&gt; 'Resin',                   'deskripsi' =&gt; 'Trem listrik bergaya awal abad ke-20 lengkap dengan pantograf dan papan rute.'),
+        array('slug' =&gt; 'vespa-klasik',   'nama' =&gt; 'Vespa Sprint 1970',            'kategori' =&gt; 'darat',       'skala' =&gt; '1:18',  'harga' =&gt; 200000, 'stok' =&gt; 15, 'terjual' =&gt; 58, 'masuk' =&gt; '2026-09-20', 'bahan' =&gt; 'Diecast',                 'deskripsi' =&gt; 'Skuter klasik dengan setang dan roda yang bisa diputar. Cocok untuk pajangan meja kerja.'),
+        array('slug' =&gt; 'mobil-sedan',    'nama' =&gt; 'Sedan Klasik 1985',            'kategori' =&gt; 'darat',       'skala' =&gt; '1:24',  'harga' =&gt; 300000, 'stok' =&gt; 7,  'terjual' =&gt; 19, 'masuk' =&gt; '2026-11-05', 'bahan' =&gt; 'Diecast',                 'deskripsi' =&gt; 'Sedan era 80-an dengan pintu dan kap mesin yang bisa dibuka.'),
+        array('slug' =&gt; 'bus-antarkota',  'nama' =&gt; 'Bus Antarkota Double Decker',  'kategori' =&gt; 'darat',       'skala' =&gt; '1:76',  'harga' =&gt; 275000, 'stok' =&gt; 10, 'terjual' =&gt; 27, 'masuk' =&gt; '2026-11-17', 'bahan' =&gt; 'Diecast &amp; plastik',       'deskripsi' =&gt; 'Bus tingkat dengan livery antarkota dan kaca jendela transparan.'),
+        array('slug' =&gt; 'pesawat-jet',    'nama' =&gt; 'Pesawat Boeing 737-800',       'kategori' =&gt; 'udara',       'skala' =&gt; '1:200', 'harga' =&gt; 250000, 'stok' =&gt; 12, 'terjual' =&gt; 64, 'masuk' =&gt; '2026-08-30', 'bahan' =&gt; 'Diecast',                 'deskripsi' =&gt; 'Replika pesawat penumpang lengkap dengan dudukan akrilik dan roda pendarat.'),
+        array('slug' =&gt; 'helikopter',     'nama' =&gt; 'Helikopter SAR',               'kategori' =&gt; 'udara',       'skala' =&gt; '1:72',  'harga' =&gt; 180000, 'stok' =&gt; 8,  'terjual' =&gt; 16, 'masuk' =&gt; '2026-11-12', 'bahan' =&gt; 'Plastik ABS',             'deskripsi' =&gt; 'Helikopter penyelamat dengan baling-baling yang bisa diputar dan winch di sisi pintu.'),
+        array('slug' =&gt; 'kapal-pinisi',   'nama' =&gt; 'Kapal Pinisi Layar Kayu',      'kategori' =&gt; 'laut',        'skala' =&gt; '1:100', 'harga' =&gt; 350000, 'stok' =&gt; 5,  'terjual' =&gt; 37, 'masuk' =&gt; '2026-10-15', 'bahan' =&gt; 'Kayu jati &amp; kain',        'deskripsi' =&gt; 'Pinisi buatan tangan perajin dengan tujuh layar kain dan lambung kayu jati.'),
+        array('slug' =&gt; 'kapal-pesiar',   'nama' =&gt; 'Kapal Pesiar Nusantara',       'kategori' =&gt; 'laut',        'skala' =&gt; '1:700', 'harga' =&gt; 520000, 'stok' =&gt; 3,  'terjual' =&gt; 9,  'masuk' =&gt; '2026-11-18', 'bahan' =&gt; 'Resin',                   'deskripsi' =&gt; 'Kapal pesiar bertingkat dengan detail sekoci dan geladak kolam renang.'),
+        array('slug' =&gt; 'mobil-balap',    'nama' =&gt; 'Mobil Balap Formula',          'kategori' =&gt; 'darat',       'skala' =&gt; '1:43',  'harga' =&gt; 150000, 'stok' =&gt; 20, 'terjual' =&gt; 45, 'masuk' =&gt; '2026-10-28', 'bahan' =&gt; 'Diecast',                 'deskripsi' =&gt; 'Mobil balap kursi tunggal dengan sayap depan-belakang dan ban slick karet.'),
+        array('slug' =&gt; 'becak-jogja',    'nama' =&gt; 'Becak Jogja',                  'kategori' =&gt; 'tradisional', 'skala' =&gt; '1:12',  'harga' =&gt; 95000,  'stok' =&gt; 25, 'terjual' =&gt; 72, 'masuk' =&gt; '2026-09-10', 'bahan' =&gt; 'Kayu &amp; logam',            'deskripsi' =&gt; 'Becak kayuh khas Yogyakarta dengan tenda lipat dan lukisan di sisi bodi.'),
+        array('slug' =&gt; 'sepeda-ontel',   'nama' =&gt; 'Sepeda Ontel',                 'kategori' =&gt; 'tradisional', 'skala' =&gt; '1:10',  'harga' =&gt; 125000, 'stok' =&gt; 14, 'terjual' =&gt; 33, 'masuk' =&gt; '2026-10-05', 'bahan' =&gt; 'Logam',                   'deskripsi' =&gt; 'Sepeda ontel lengkap dengan boncengan, lampu depan, dan rantai yang bisa berputar.'),
+        array('slug' =&gt; 'traktor-sawah',  'nama' =&gt; 'Traktor Sawah',                'kategori' =&gt; 'tradisional', 'skala' =&gt; '1:32',  'harga' =&gt; 140000, 'stok' =&gt; 11, 'terjual' =&gt; 8,  'masuk' =&gt; '2026-11-08', 'bahan' =&gt; 'Diecast',                 'deskripsi' =&gt; 'Traktor tangan untuk membajak sawah, lengkap dengan bajak yang bisa dilepas.'),
+    );
+
+    /** Diskon periode tertentu (di jurnal: info diskon langsung tampil secara real-time di website) */
+    private $promo = array(
+        'judul'    =&gt; 'Pekan Kereta Nusantara',
+        'ket'      =&gt; 'Semua miniatur kereta api diskon 15% sampai akhir bulan.',
+        'kategori' =&gt; 'kereta',
+        'persen'   =&gt; 15,
+        'mulai'    =&gt; '2026-11-18 00:00:00',
+        'selesai'  =&gt; '2026-11-30 23:59:59',
+    );
+
+    /* ---------------- kategori ---------------- */
+
+    public function kategori()
+    {
+        $hasil = array();
+        foreach ($this-&gt;kategori as $slug =&gt; $k)
+        {
+            $k['slug'] = $slug;
+            $k['jumlah'] = count($this-&gt;by_kategori($slug));
+            $hasil[] = (object) $k;
+        }
+        return $hasil;
+    }
+
+    public function kategori_by_slug($slug)
+    {
+        return isset($this-&gt;kategori[$slug]) ? (object) ($this-&gt;kategori[$slug] + array('slug' =&gt; $slug)) : NULL;
+    }
+
+    /* ---------------- produk ---------------- */
+
+    /** Semua produk, sudah dilengkapi harga setelah promo */
+    public function semua()
+    {
+        return array_map(array($this, '_lengkapi'), $this-&gt;produk);
+    }
+
+    public function by_slug($slug)
+    {
+        foreach ($this-&gt;semua() as $p)
+        {
+            if ($p-&gt;slug === $slug) return $p;
+        }
+        return NULL;
+    }
+
+    public function by_kategori($slug)
+    {
+        return array_values(array_filter($this-&gt;semua(), function ($p) use ($slug) { return $p-&gt;kategori === $slug; }));
+    }
+
+    /** Produk terbaru = tanggal masuk paling akhir */
+    public function terbaru($limit = 4)
+    {
+        $data = $this-&gt;semua();
+        usort($data, function ($a, $b) { return strcmp($b-&gt;masuk, $a-&gt;masuk); });
+        return array_slice($data, 0, $limit);
+    }
+
+    /** Produk terlaris = jumlah terjual terbanyak */
+    public function terlaris($limit = 5)
+    {
+        $data = $this-&gt;semua();
+        usort($data, function ($a, $b) { return $b-&gt;terjual - $a-&gt;terjual; });
+        return array_slice($data, 0, $limit);
+    }
+
+    public function cari($kata)
+    {
+        $kata = mb_strtolower(trim($kata));
+        if ($kata === '') return array();
+        return array_values(array_filter($this-&gt;semua(), function ($p) use ($kata) {
+            return mb_strpos(mb_strtolower($p-&gt;nama.' '.$p-&gt;deskripsi.' '.$p-&gt;skala), $kata) !== FALSE;
+        }));
+    }
+
+    /** Produk lain dari kategori yang sama */
+    public function serupa($produk, $limit = 3)
+    {
+        $lain = array_filter($this-&gt;by_kategori($produk-&gt;kategori), function ($p) use ($produk) { return $p-&gt;slug !== $produk-&gt;slug; });
+        return array_slice(array_values($lain), 0, $limit);
+    }
+
+    /* ---------------- promo ---------------- */
+
+    public function promo_aktif()
+    {
+        $now = date('Y-m-d H:i:s');
+        if ($now &lt; $this-&gt;promo['mulai'] || $now &gt; $this-&gt;promo['selesai']) return NULL;
+        $p = (object) $this-&gt;promo;
+        $p-&gt;produk = $this-&gt;by_kategori($p-&gt;kategori);
+        return $p;
+    }
+
+    /* ---------------- konten pendukung ---------------- */
+
+    public function testimoni()
+    {
+        return array(
+            (object) array('nama' =&gt; 'Raka Aditama', 'kota' =&gt; 'Semarang',  'produk' =&gt; 'Lokomotif Uap C28', 'isi' =&gt; 'Detail roda dan cerobongnya rapi sekali. Dikemas dengan busa tebal, sampai di rumah tanpa lecet.'),
+            (object) array('nama' =&gt; 'Laras Wening', 'kota' =&gt; 'Bandung',   'produk' =&gt; 'Becak Jogja',      'isi' =&gt; 'Beli untuk oleh-oleh teman kantor. Admin cepat membalas waktu saya tanya ongkir ke Bandung.'),
+            (object) array('nama' =&gt; 'Yosef Hartono', 'kota' =&gt; 'Surabaya', 'produk' =&gt; 'Kapal Pinisi Layar Kayu', 'isi' =&gt; 'Layarnya kain asli, bukan plastik. Sekarang jadi pajangan utama di ruang tamu.'),
+        );
+    }
+
+    /** Alur belanja, mengikuti tahapan pada halaman selesai bayar di jurnal */
+    public function langkah_belanja()
+    {
+        return array(
+            (object) array('judul' =&gt; 'Masukkan ke keranjang', 'isi' =&gt; 'Pilih miniatur dan simpan di keranjang. Isi keranjang tetap tersimpan selama Anda menjelajah.'),
+            (object) array('judul' =&gt; 'Pilih jasa pengiriman', 'isi' =&gt; 'Ongkos kirim dihitung dari kota tujuan dan kurir yang dipilih.'),
+            (object) array('judul' =&gt; 'Pilih metode pembayaran', 'isi' =&gt; 'Transfer ke rekening bank toko sesuai total yang tertera.'),
+            (object) array('judul' =&gt; 'Konfirmasi pembayaran', 'isi' =&gt; 'Masukkan ID pesanan dan jumlah transfer agar pesanan segera diproses.'),
+            (object) array('judul' =&gt; 'Pesanan dikirim', 'isi' =&gt; 'Nomor resi dikirim ke email dan bisa dipantau di riwayat transaksi.'),
+        );
+    }
+
+    public function layanan()
+    {
+        return (object) array(
+            'kurir' =&gt; array('JNE', 'J&amp;T Express', 'SiCepat', 'Pos Indonesia'),
+            'bank'  =&gt; array('BNI', 'BCA', 'Mandiri'),
+            'cs'    =&gt; array('wa' =&gt; '0812-0000-0000', 'email' =&gt; 'halo@shopease.test', 'jam' =&gt; 'Senin–Sabtu, 08.00–20.00 WIB'),
+            'alamat' =&gt; 'Bantul, Daerah Istimewa Yogyakarta',
+        );
+    }
+
+    /* ---------------- helper internal ---------------- */
+
+    private function _lengkapi(array $p)
+    {
+        $p = (object) $p;
+        $p-&gt;gambar = 'assets/img/produk/'.$p-&gt;slug.'.png';
+        $p-&gt;kategori_nama = $this-&gt;kategori[$p-&gt;kategori]['nama'];
+        $p-&gt;diskon = 0;
+        $now = date('Y-m-d H:i:s');
+        if ($p-&gt;kategori === $this-&gt;promo['kategori'] &amp;&amp; $now &gt;= $this-&gt;promo['mulai'] &amp;&amp; $now &lt;= $this-&gt;promo['selesai'])
+        {
+            $p-&gt;diskon = $this-&gt;promo['persen'];
+        }
+        $p-&gt;harga_akhir = (int) round($p-&gt;harga * (100 - $p-&gt;diskon) / 100, -2);
+        $p-&gt;baru = (strtotime($p-&gt;masuk) &gt;= strtotime('-14 days'));
+        return $p;
+    }
+}</code></pre>
+
+<h2>3. Modifikasi View</h2>
+<p>View dipecah menjadi <b>layout</b> (<code>layouts/main.php</code>), <b>partial</b> yang dipakai ulang (<code>navbar</code>, <code>footer</code>, <code>kartu_produk</code>, <code>tag_harga</code>), dan landing page yang <b>dirangkai dari section</b>.</p>
+
+<h3>views/home/landing.php</h3>
+<pre style="background:#1e1e1e;color:#d4d4d4;padding:12px;border-radius:6px;overflow-x:auto;font-size:13px;"><code>&lt;?php
+/**
+ * Landing page ShopEase. Setiap section adalah view terpisah di views/home/sections/
+ * sehingga urutan section mudah diubah dan tiap bagian mudah dirawat.
+ * Semua data ($unggulan, $terbaru, $promo, ...) disiapkan oleh controller Home::index().
+ */
+$this-&gt;load-&gt;view('home/sections/hero');
+$this-&gt;load-&gt;view('home/sections/kategori');
+if ($promo) $this-&gt;load-&gt;view('home/sections/promo');
+$this-&gt;load-&gt;view('home/sections/terbaru');
+$this-&gt;load-&gt;view('home/sections/terlaris');
+$this-&gt;load-&gt;view('home/sections/cara_belanja');
+$this-&gt;load-&gt;view('home/sections/testimoni');
+$this-&gt;load-&gt;view('home/sections/layanan');</code></pre>
+
+<h3>views/layouts/main.php</h3>
+<pre style="background:#1e1e1e;color:#d4d4d4;padding:12px;border-radius:6px;overflow-x:auto;font-size:13px;"><code>&lt;!DOCTYPE html&gt;
+&lt;html lang="id"&gt;
+&lt;head&gt;
+    &lt;meta charset="utf-8"&gt;
+    &lt;meta name="viewport" content="width=device-width, initial-scale=1"&gt;
+    &lt;title&gt;&lt;?= html_escape($title) ?&gt;&lt;/title&gt;
+    &lt;meta name="description" content="ShopEase: toko online miniatur kereta, kapal, pesawat, dan kendaraan tradisional dari Yogyakarta."&gt;
+    &lt;link rel="preconnect" href="https://fonts.googleapis.com"&gt;
+    &lt;link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700;12..96,800&amp;family=Public+Sans:wght@400;500;600&amp;display=swap" rel="stylesheet"&gt;
+    &lt;link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet"&gt;
+    &lt;link href="&lt;?= base_url('assets/css/shopease.css') ?&gt;" rel="stylesheet"&gt;
+&lt;/head&gt;
+&lt;body&gt;
+&lt;?php $this-&gt;load-&gt;view('partials/navbar'); ?&gt;
+
+&lt;main id="isi"&gt;
+    &lt;?= $content ?&gt;
+&lt;/main&gt;
+
+&lt;?php $this-&gt;load-&gt;view('partials/footer'); ?&gt;
+
+&lt;?php if ($notif = $this-&gt;session-&gt;flashdata('notif')): ?&gt;
+    &lt;div class="toast-se" role="status"&gt;
+        &lt;?= html_escape($notif) ?&gt; &lt;a href="&lt;?= site_url('keranjang') ?&gt;"&gt;Lihat keranjang&lt;/a&gt;
+    &lt;/div&gt;
+&lt;?php endif; ?&gt;
+
+&lt;script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"&gt;&lt;/script&gt;
+&lt;script&gt;
+    // hitung mundur promo: elemen [data-selesai] berisi waktu akhir, anak [data-unit] diisi angka
+    document.querySelectorAll('[data-selesai]').forEach(function (box) {
+        var akhir = new Date(box.dataset.selesai.replace(' ', 'T')).getTime();
+        function tick() {
+            var s = Math.max(0, Math.floor((akhir - Date.now()) / 1000));
+            var v = { hari: Math.floor(s / 86400), jam: Math.floor(s % 86400 / 3600), menit: Math.floor(s % 3600 / 60) };
+            box.querySelectorAll('[data-unit]').forEach(function (el) { el.textContent = String(v[el.dataset.unit]).padStart(2, '0'); });
+        }
+        tick(); setInterval(tick, 30000);
+    });
+    // sembunyikan notifikasi keranjang setelah beberapa detik
+    var t = document.querySelector('.toast-se');
+    if (t) setTimeout(function () { t.remove(); }, 6000);
+&lt;/script&gt;
+&lt;/body&gt;
+&lt;/html&gt;</code></pre>
+
+<h3>views/home/sections/hero.php — vitrin produk</h3>
+<pre style="background:#1e1e1e;color:#d4d4d4;padding:12px;border-radius:6px;overflow-x:auto;font-size:13px;"><code>&lt;section class="hero"&gt;
+    &lt;div class="container"&gt;
+        &lt;div class="row align-items-center g-5"&gt;
+            &lt;div class="col-lg-6"&gt;
+                &lt;h1&gt;Miniatur kereta, kapal, dan kendaraan untuk rak koleksimu&lt;/h1&gt;
+                &lt;p class="lead measure mt-3"&gt;&lt;?= $total_produk ?&gt; replika skala 1:10 sampai 1:700, dipilih dan dikemas sendiri di Yogyakarta. Pesan kapan saja tanpa harus datang ke toko.&lt;/p&gt;
+                &lt;div class="d-flex flex-wrap gap-2 mt-4"&gt;
+                    &lt;a class="btn btn-se" href="#terbaru"&gt;Lihat koleksi terbaru&lt;/a&gt;
+                    &lt;a class="btn btn-se btn-se-line" href="&lt;?= site_url('cara-belanja') ?&gt;"&gt;Cara belanja&lt;/a&gt;
+                &lt;/div&gt;
+                &lt;ul class="fakta"&gt;
+                    &lt;li&gt;Pesanan diterima 24 jam&lt;/li&gt;
+                    &lt;li&gt;Dikemas busa anti-benturan&lt;/li&gt;
+                    &lt;li&gt;Konfirmasi bayar online&lt;/li&gt;
+                    &lt;li&gt;Kirim ke seluruh Indonesia&lt;/li&gt;
+                &lt;/ul&gt;
+            &lt;/div&gt;
+            &lt;div class="col-lg-6"&gt;
+                &lt;!-- Vitrin: pajangan produk seperti lemari kaca di toko miniatur --&gt;
+                &lt;div class="vitrin"&gt;
+                    &lt;div class="vitrin-grid"&gt;
+                        &lt;a class="rak utama" href="&lt;?= site_url('produk/'.$unggulan-&gt;slug) ?&gt;"&gt;
+                            &lt;img src="&lt;?= base_url($unggulan-&gt;gambar) ?&gt;" alt="Miniatur &lt;?= html_escape($unggulan-&gt;nama) ?&gt;"&gt;
+                            &lt;span class="tag-gantung"&gt;&lt;?php $this-&gt;load-&gt;view('partials/tag_harga', array('p' =&gt; $unggulan)); ?&gt;&lt;/span&gt;
+                            &lt;span class="nama-rak"&gt;&lt;?= html_escape($unggulan-&gt;nama) ?&gt;, &lt;?= $unggulan-&gt;skala ?&gt;&lt;/span&gt;
+                        &lt;/a&gt;
+                        &lt;?php foreach ($pajangan as $p): ?&gt;
+                            &lt;a class="rak" href="&lt;?= site_url('produk/'.$p-&gt;slug) ?&gt;"&gt;
+                                &lt;img src="&lt;?= base_url($p-&gt;gambar) ?&gt;" alt="Miniatur &lt;?= html_escape($p-&gt;nama) ?&gt;"&gt;
+                                &lt;span class="nama-rak"&gt;&lt;?= html_escape($p-&gt;nama) ?&gt;&lt;/span&gt;
+                            &lt;/a&gt;
+                        &lt;?php endforeach; ?&gt;
+                    &lt;/div&gt;
+                    &lt;div class="vitrin-kaki"&gt;&lt;span&gt;Etalase minggu ini&lt;/span&gt;&lt;a href="#terlaris" class="text-reset"&gt;Paling banyak dibeli&lt;/a&gt;&lt;/div&gt;
+                &lt;/div&gt;
+            &lt;/div&gt;
+        &lt;/div&gt;
+    &lt;/div&gt;
+&lt;/section&gt;</code></pre>
+
+<h3>views/home/sections/promo.php</h3>
+<pre style="background:#1e1e1e;color:#d4d4d4;padding:12px;border-radius:6px;overflow-x:auto;font-size:13px;"><code>&lt;section id="promo" class="promo-band"&gt;
+    &lt;div class="container"&gt;
+        &lt;div class="row g-4 align-items-center"&gt;
+            &lt;div class="col-lg-5"&gt;
+                &lt;h2&gt;&lt;?= html_escape($promo-&gt;judul) ?&gt;&lt;/h2&gt;
+                &lt;p class="measure"&gt;&lt;?= html_escape($promo-&gt;ket) ?&gt; Berlaku sampai &lt;?= tanggal_id($promo-&gt;selesai) ?&gt;.&lt;/p&gt;
+                &lt;div class="hitung" data-selesai="&lt;?= $promo-&gt;selesai ?&gt;" aria-label="Sisa waktu promo"&gt;
+                    &lt;div&gt;&lt;b data-unit="hari"&gt;--&lt;/b&gt;&lt;small&gt;hari&lt;/small&gt;&lt;/div&gt;
+                    &lt;div&gt;&lt;b data-unit="jam"&gt;--&lt;/b&gt;&lt;small&gt;jam&lt;/small&gt;&lt;/div&gt;
+                    &lt;div&gt;&lt;b data-unit="menit"&gt;--&lt;/b&gt;&lt;small&gt;menit&lt;/small&gt;&lt;/div&gt;
+                &lt;/div&gt;
+                &lt;a class="btn btn-se mt-4" href="&lt;?= site_url('kategori/'.$promo-&gt;kategori) ?&gt;"&gt;Lihat semua kereta api&lt;/a&gt;
+            &lt;/div&gt;
+            &lt;div class="col-lg-7"&gt;
+                &lt;div class="row g-2"&gt;
+                    &lt;?php foreach ($promo-&gt;produk as $p): ?&gt;
+                        &lt;div class="col-4"&gt;
+                            &lt;a class="promo-item" href="&lt;?= site_url('produk/'.$p-&gt;slug) ?&gt;"&gt;
+                                &lt;img src="&lt;?= base_url($p-&gt;gambar) ?&gt;" alt=""&gt;
+                                &lt;span&gt;
+                                    &lt;b class="d-block lh-sm mb-1"&gt;&lt;?= html_escape($p-&gt;nama) ?&gt;&lt;/b&gt;
+                                    &lt;s&gt;&lt;?= rupiah($p-&gt;harga) ?&gt;&lt;/s&gt; &lt;b&gt;&lt;?= rupiah($p-&gt;harga_akhir) ?&gt;&lt;/b&gt;
+                                &lt;/span&gt;
+                            &lt;/a&gt;
+                        &lt;/div&gt;
+                    &lt;?php endforeach; ?&gt;
+                &lt;/div&gt;
+            &lt;/div&gt;
+        &lt;/div&gt;
+    &lt;/div&gt;
+&lt;/section&gt;</code></pre>
+
+<h3>views/partials/kartu_produk.php &amp; tag_harga.php</h3>
+<pre style="background:#1e1e1e;color:#d4d4d4;padding:12px;border-radius:6px;overflow-x:auto;font-size:13px;"><code>&lt;?php // Kartu produk dipakai di landing, kategori, pencarian, dan produk serupa. Variabel: $p ?&gt;
+&lt;article class="produk-card"&gt;
+    &lt;a class="foto" href="&lt;?= site_url('produk/'.$p-&gt;slug) ?&gt;" aria-label="&lt;?= html_escape($p-&gt;nama) ?&gt;"&gt;
+        &lt;img src="&lt;?= base_url($p-&gt;gambar) ?&gt;" alt="Miniatur &lt;?= html_escape($p-&gt;nama) ?&gt;" loading="lazy"&gt;
+        &lt;?php if ($p-&gt;baru): ?&gt;&lt;span class="label-baru"&gt;Baru&lt;/span&gt;&lt;?php endif; ?&gt;
+        &lt;span class="tag-gantung"&gt;&lt;?php $this-&gt;load-&gt;view('partials/tag_harga', array('p' =&gt; $p)); ?&gt;&lt;/span&gt;
+    &lt;/a&gt;
+    &lt;div class="info"&gt;
+        &lt;a class="nama" href="&lt;?= site_url('produk/'.$p-&gt;slug) ?&gt;"&gt;&lt;?= html_escape($p-&gt;nama) ?&gt;&lt;/a&gt;
+        &lt;div class="meta"&gt;Skala &lt;?= $p-&gt;skala ?&gt;, &lt;?= html_escape($p-&gt;bahan) ?&gt;&lt;/div&gt;
+        &lt;?= form_open('keranjang/tambah') ?&gt;
+            &lt;input type="hidden" name="slug" value="&lt;?= $p-&gt;slug ?&gt;"&gt;
+            &lt;input type="hidden" name="kembali" value="&lt;?= html_escape(uri_string()) ?&gt;"&gt;
+            &lt;button type="submit" class="btn btn-se btn-se-line btn-se-sm"&gt;Tambah ke keranjang&lt;/button&gt;
+        &lt;?= form_close() ?&gt;
+    &lt;/div&gt;
+&lt;/article&gt;
+
+&lt;?php // Label harga gantung. Variabel: $p (produk) ?&gt;
+&lt;span class="tag-harga&lt;?= $p-&gt;diskon ? ' diskon' : '' ?&gt;"&gt;
+    &lt;?php if ($p-&gt;diskon): ?&gt;&lt;s&gt;&lt;?= rupiah($p-&gt;harga) ?&gt;&lt;/s&gt;&lt;?php endif; ?&gt;
+    &lt;?= rupiah($p-&gt;harga_akhir) ?&gt;
+&lt;/span&gt;</code></pre>
+
+<h3>Desain</h3>
+<ul>
+<li>Konsep <b>etalase toko miniatur</b>: hero berupa vitrin (lemari pajangan) dan <b>label harga gantung</b> ala toko hobi sebagai elemen khas.</li>
+<li>Palet dari dunia model kit: biru tua enamel, abu kebiruan, kuning sinyal kereta untuk promo, merah rel untuk diskon.</li>
+<li>Tipografi Bricolage Grotesque (judul) dan Public Sans (teks).</li>
+<li>Alur belanja digambar sebagai jalur rel dengan lima stasiun.</li>
+<li>Responsif sampai ukuran ponsel; file CSS lengkap ada di GitHub (<code>assets/css/shopease.css</code>).</li>
+</ul>
+
+<h2>Hasil</h2>
+<p><i>[Sisipkan gambar: s8-01 sampai s8-18 — landing page penuh, hero, promo, notifikasi keranjang, kategori kereta, urut harga, pencarian, pencarian kosong, detail produk, keranjang, validasi &amp; sukses newsletter, tentang, cara belanja, kontak, 404, tampilan mobile, menu mobile]</i></p>
+
+<h2>Kesimpulan</h2>
+<p>Dengan memodifikasi <b>routing</b>, URL ShopEase menjadi ramah pengguna (<code>/produk/kapal-pinisi</code>, <code>/kategori/kereta</code>, <code>/cara-belanja</code>). Satu route regex bisa melayani beberapa halaman, dan <code>404_override</code> memberi halaman 404 sendiri. <b>Controller</b> bertugas menyiapkan data, sedangkan <code>MY_Controller</code> mengurus data global dan layout sehingga controller lain tetap ringkas. <b>View</b> dipecah menjadi layout, partial, dan section, sehingga komponen seperti kartu produk dan label harga cukup ditulis sekali dan dipakai di banyak halaman. Hal ini sesuai dengan tujuan penerapan MVC pada studi kasus: aplikasi lebih mudah dipahami dan dikembangkan oleh programmer berikutnya.</p>
+
+</div>

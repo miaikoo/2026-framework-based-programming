@@ -1,0 +1,17 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "side-tab",
+        "value": "*",
+        "files": [
+          "8-ShopEase-Landing/shopease/assets/css/shopease.css"
+        ],
+        "createdAt": "2026-11-21T14:42:02.767Z",
+        "reason": "Claude triage: L132 is .promo-band::before, a full-width railway-crossing stripe across a full-bleed section, not a side accent on a card"
+      }
+    ]
+  }
+}
