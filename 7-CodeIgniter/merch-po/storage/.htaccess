@@ -1,0 +1,3 @@
+# Bukti transfer tidak boleh diakses langsung dari browser.
+# File hanya dikirim lewat controller setelah cek login & kepemilikan.
+Require all denied

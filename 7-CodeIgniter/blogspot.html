@@ -1,0 +1,1940 @@
+<!-- Tempel seluruh isi file ini di Blogger: New Post → ikon pensil → HTML view -->
+<div style="font-family:Segoe UI,Arial,sans-serif;line-height:1.7;color:#222;">
+
+<h1>Tugas 7 PBKK — CodeIgniter 3: Tokobuah, SIAKAD Presensi &amp; MerchHima</h1>
+
+<p>📂 Source code lengkap: <a href="https://github.com/miaikoo/2026-framework-based-programming/tree/main/7-CodeIgniter" target="_blank">github.com/miaikoo/2026-framework-based-programming</a></p>
+
+<p>Pada tugas ini saya membangun tiga aplikasi web dengan <b>CodeIgniter 3.1.13</b>, <b>PHP</b>, dan <b>MySQL/MariaDB</b> di atas <b>XAMPP</b>. <b>Latihan 1</b> adalah aplikasi <b>Tokobuah</b> yang mencakup materi dasar CodeIgniter (PBKK 2-1 sampai 2-7). <b>Latihan 2</b> terdiri dari dua studi kasus: <b>SIAKAD Presensi</b> (sistem akademik dengan presensi berbasis kode dan kelayakan UAS) dan <b>MerchHima</b> (toko online preorder merchandise himpunan).</p>
+
+<h2>Lingkungan &amp; Persiapan</h2>
+<ul>
+<li>Windows 11, XAMPP (Apache 2.4, MariaDB 10.11, PHP 8.5), CodeIgniter 3.1.13.</li>
+<li>Ketiga aplikasi memakai <b>satu folder <code>system/</code></b> bersama: di setiap <code>index.php</code> diubah <code>$system_path = '../system';</code>.</li>
+<li>CodeIgniter 3.1.13 dirilis sebelum PHP 8.2, sehingga di PHP 8.5 muncul pesan <i>Deprecated</i> (misalnya <i>Creation of dynamic property</i>). Pesan itu hanya peringatan, jadi disembunyikan dengan <code>error_reporting(E_ALL &amp; ~E_DEPRECATED &amp; ~E_USER_DEPRECATED)</code>.</li>
+<li><code>base_url</code> dihitung otomatis, <code>index_page</code> dikosongkan dan ditambah <code>.htaccess</code> agar URL tanpa <code>index.php</code>, <code>csrf_protection</code> diaktifkan, dan bahasa diubah ke <b>indonesian</b> (file <code>form_validation_lang.php</code> dan <code>upload_lang.php</code> diterjemahkan sendiri).</li>
+</ul>
+<p><b>Cara menjalankan:</b> letakkan folder di <code>htdocs</code>, start Apache &amp; MySQL, import <code>database/tokobuah.sql</code>, <code>siakad.sql</code>, dan <code>merch_po.sql</code> lewat phpMyAdmin, lalu buka <code>http://localhost/pbkk7/tokobuah/</code>, <code>/siakad/</code>, dan <code>/merch-po/</code>.</p>
+
+<h3>.htaccess (setiap aplikasi)</h3>
+<pre style="background:#1e1e1e;color:#d4d4d4;padding:12px;border-radius:6px;overflow-x:auto;font-size:13px;"><code># Menghapus index.php dari URL (butuh mod_rewrite)
+&lt;IfModule mod_rewrite.c&gt;
+    RewriteEngine On
+    RewriteCond %{REQUEST_FILENAME} !-f
+    RewriteCond %{REQUEST_FILENAME} !-d
+    RewriteRule ^(.*)$ index.php/$1 [L]
+&lt;/IfModule&gt;</code></pre>
+
+<!-- ===================================================== -->
+<h2>Latihan 1 — Tokobuah</h2>
+<p>Toko buah dengan halaman katalog untuk pengunjung dan panel admin berbasis template <b>SB Admin 7</b> (Bootstrap 5).</p>
+<table style="border-collapse:collapse;width:100%;font-size:14px;" border="1" cellpadding="6">
+<tr style="background:#eef2ff"><th>Materi</th><th>Implementasi</th></tr>
+<tr><td>2-1 Instalasi &amp; konfigurasi</td><td>base_url, database, autoload, .htaccess</td></tr>
+<tr><td>2-2 Controller &amp; routing</td><td><code>Home</code> sebagai default controller; route <code>produk/(:num)</code>, <code>login</code>, <code>logout</code>, <code>admin</code></td></tr>
+<tr><td>2-3 View &amp; Bootstrap</td><td>Katalog kartu produk, pencarian, filter kategori, detail produk</td></tr>
+<tr><td>2-4 Template admin</td><td>SB Admin dipecah menjadi partial: head, navbar, sidebar, breadcrumb, alert, footer, js</td></tr>
+<tr><td>2-5 Model &amp; CRUD</td><td><code>Product_model</code> + Form Validation; satu view form untuk tambah dan edit</td></tr>
+<tr><td>2-6 Upload</td><td>Library Upload (jpg/png/webp ≤ 2 MB), pratinjau, file lama dihapus saat diganti</td></tr>
+<tr><td>2-7 Login &amp; hak akses</td><td>password_hash, session, <code>Admin_Controller</code>, role staff tidak bisa menghapus</td></tr>
+</table>
+
+<h3>Database</h3>
+<pre style="background:#1e1e1e;color:#d4d4d4;padding:12px;border-radius:6px;overflow-x:auto;font-size:13px;"><code>-- =========================================================
+-- Latihan 1 - Tokobuah (CodeIgniter 3)
+-- Database: pbkk_tokobuah
+-- Import lewat phpMyAdmin (tab Import) atau:
+--   mysql -u root &lt; tokobuah.sql
+-- =========================================================
+DROP DATABASE IF EXISTS pbkk_tokobuah;
+CREATE DATABASE pbkk_tokobuah CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;
+USE pbkk_tokobuah;
+
+-- ---------- Produk (buah) ----------
+CREATE TABLE products (
+    product_id   INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    name         VARCHAR(100)  NOT NULL,
+    category     ENUM('Lokal','Impor') NOT NULL DEFAULT 'Lokal',
+    price        INT UNSIGNED  NOT NULL,              -- harga per satuan, rupiah
+    unit         VARCHAR(20)   NOT NULL DEFAULT 'kg', -- kg / buah / sisir / pack
+    stock        INT UNSIGNED  NOT NULL DEFAULT 0,
+    image        VARCHAR(255)  NOT NULL DEFAULT 'default.png',
+    description  TEXT,
+    created_at   DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at   DATETIME      NULL ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB;
+
+-- ---------- Pengguna admin ----------
+CREATE TABLE users (
+    user_id     INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    username    VARCHAR(50)  NOT NULL UNIQUE,
+    email       VARCHAR(100) NOT NULL UNIQUE,
+    password    VARCHAR(255) NOT NULL,                -- hasil password_hash()
+    full_name   VARCHAR(100) NOT NULL,
+    role        ENUM('admin','staff') NOT NULL DEFAULT 'staff',
+    last_login  DATETIME     NULL,
+    created_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB;</code></pre>
+
+<h3>config/routes.php (bagian yang diubah)</h3>
+<pre style="background:#1e1e1e;color:#d4d4d4;padding:12px;border-radius:6px;overflow-x:auto;font-size:13px;"><code>$route['default_controller'] = 'welcome';
+|
+| This route indicates which controller class should be loaded if the
+| URI contains no data. In the above example, the "welcome" class
+| would be loaded.
+|
+|    $route['404_override'] = 'errors/page_missing';
+|
+| This route will tell the Router which controller/method to use if those
+| provided in the URL cannot be matched to a valid route.
+|
+|    $route['translate_uri_dashes'] = FALSE;
+|
+| This is not exactly a route, but allows you to automatically route
+| controller and method names that contain dashes. '-' isn't a valid
+| class or method name character, so it requires translation.
+| When you set this option to TRUE, it will replace ALL dashes in the
+| controller and method URI segments.
+|
+| Examples:    my-controller/index    -&gt; my_controller/index
+|        my-controller/my-method    -&gt; my_controller/my_method
+*/
+$route['default_controller'] = 'home';
+$route['404_override'] = '';
+$route['translate_uri_dashes'] = FALSE;
+
+// Halaman toko
+$route['produk/(:num)'] = 'home/detail/$1';
+
+// Autentikasi
+$route['login']  = 'auth/login';
+$route['logout'] = 'auth/logout';
+
+// /admin langsung ke dashboard
+$route['admin'] = 'admin/overview';</code></pre>
+
+<h3>core/MY_Controller.php — pengecekan login untuk semua halaman admin</h3>
+<pre style="background:#1e1e1e;color:#d4d4d4;padding:12px;border-radius:6px;overflow-x:auto;font-size:13px;"><code>&lt;?php
+defined('BASEPATH') OR exit('No direct script access allowed');
+
+/**
+ * Controller dasar. CodeIgniter otomatis memuat file application/core/MY_Controller.php
+ * karena memakai prefix "MY_" (lihat $config['subclass_prefix']).
+ */
+class MY_Controller extends CI_Controller
+{
+}
+
+/**
+ * Semua controller di folder admin/ mewarisi class ini, jadi pengecekan login
+ * cukup ditulis sekali di sini, tidak diulang di setiap controller.
+ */
+class Admin_Controller extends MY_Controller
+{
+    /** @var object data user yang sedang login */
+    protected $user;
+
+    public function __construct()
+    {
+        parent::__construct();
+
+        if ( ! $this-&gt;session-&gt;userdata('logged_in'))
+        {
+            $this-&gt;session-&gt;set_flashdata('warning', 'Silakan login terlebih dahulu.');
+            redirect('login');
+        }
+
+        $this-&gt;user = (object) array(
+            'id'        =&gt; $this-&gt;session-&gt;userdata('user_id'),
+            'username'  =&gt; $this-&gt;session-&gt;userdata('username'),
+            'full_name' =&gt; $this-&gt;session-&gt;userdata('full_name'),
+            'role'      =&gt; $this-&gt;session-&gt;userdata('role'),
+        );
+        // tersedia di semua view sebagai $user
+        $this-&gt;load-&gt;vars(array('user' =&gt; $this-&gt;user));
+    }
+
+    /** Hanya role tertentu yang boleh melanjutkan. */
+    protected function only_role($role)
+    {
+        if ($this-&gt;user-&gt;role !== $role)
+        {
+            $this-&gt;session-&gt;set_flashdata('danger', 'Akses ditolak: fitur ini khusus '.$role.'.');
+            redirect('admin/products');
+        }
+    }
+}</code></pre>
+
+<h3>models/Product_model.php</h3>
+<pre style="background:#1e1e1e;color:#d4d4d4;padding:12px;border-radius:6px;overflow-x:auto;font-size:13px;"><code>&lt;?php
+defined('BASEPATH') OR exit('No direct script access allowed');
+
+class Product_model extends CI_Model
+{
+    private $table = 'products';
+
+    /** Aturan validasi form tambah/edit produk */
+    public function rules()
+    {
+        return array(
+            array('field' =&gt; 'name',        'label' =&gt; 'Nama produk', 'rules' =&gt; 'trim|required|max_length[100]'),
+            array('field' =&gt; 'category',    'label' =&gt; 'Kategori',    'rules' =&gt; 'required|in_list[Lokal,Impor]'),
+            array('field' =&gt; 'price',       'label' =&gt; 'Harga',       'rules' =&gt; 'trim|required|is_natural_no_zero'),
+            array('field' =&gt; 'unit',        'label' =&gt; 'Satuan',      'rules' =&gt; 'required|in_list[kg,buah,sisir,pack]'),
+            array('field' =&gt; 'stock',       'label' =&gt; 'Stok',        'rules' =&gt; 'trim|required|is_natural'),
+            array('field' =&gt; 'description', 'label' =&gt; 'Deskripsi',   'rules' =&gt; 'trim|max_length[500]'),
+        );
+    }
+
+    /**
+     * Ambil semua produk, bisa difilter kata kunci dan kategori.
+     */
+    public function get_all($keyword = NULL, $category = NULL, $order = 'name ASC')
+    {
+        if ($keyword)
+        {
+            $this-&gt;db-&gt;group_start()
+                -&gt;like('name', $keyword)
+                -&gt;or_like('description', $keyword)
+                -&gt;group_end();
+        }
+        if (in_array($category, array('Lokal', 'Impor'), TRUE))
+        {
+            $this-&gt;db-&gt;where('category', $category);
+        }
+        return $this-&gt;db-&gt;order_by($order)-&gt;get($this-&gt;table)-&gt;result();
+    }
+
+    public function get_by_id($id)
+    {
+        return $this-&gt;db-&gt;get_where($this-&gt;table, array('product_id' =&gt; (int) $id))-&gt;row();
+    }
+
+    public function insert(array $data)
+    {
+        $this-&gt;db-&gt;insert($this-&gt;table, $data);
+        return $this-&gt;db-&gt;insert_id();
+    }
+
+    public function update($id, array $data)
+    {
+        return $this-&gt;db-&gt;update($this-&gt;table, $data, array('product_id' =&gt; (int) $id));
+    }
+
+    public function delete($id)
+    {
+        return $this-&gt;db-&gt;delete($this-&gt;table, array('product_id' =&gt; (int) $id));
+    }
+
+    /** Angka-angka untuk kartu ringkasan di dashboard */
+    public function summary()
+    {
+        return $this-&gt;db-&gt;select('COUNT(*) AS total_produk,
+                COALESCE(SUM(stock), 0) AS total_stok,
+                COALESCE(SUM(stock * price), 0) AS nilai_stok,
+                COALESCE(SUM(stock &lt; 20), 0) AS stok_menipis', FALSE)
+            -&gt;get($this-&gt;table)-&gt;row();
+    }
+
+    public function latest($limit = 5)
+    {
+        return $this-&gt;db-&gt;order_by('product_id', 'DESC')-&gt;limit($limit)-&gt;get($this-&gt;table)-&gt;result();
+    }
+}</code></pre>
+
+<h3>controllers/admin/Products.php — CRUD + upload</h3>
+<pre style="background:#1e1e1e;color:#d4d4d4;padding:12px;border-radius:6px;overflow-x:auto;font-size:13px;"><code>&lt;?php
+defined('BASEPATH') OR exit('No direct script access allowed');
+
+/**
+ * CRUD produk + upload gambar.
+ *   GET  /admin/products            daftar produk
+ *   GET  /admin/products/add        form tambah     (POST = simpan)
+ *   GET  /admin/products/edit/3     form edit       (POST = simpan)
+ *   POST /admin/products/delete     hapus (khusus role admin)
+ */
+class Products extends Admin_Controller
+{
+    const UPLOAD_DIR = './upload/product/';
+
+    public function __construct()
+    {
+        parent::__construct();
+        $this-&gt;load-&gt;model('product_model');
+    }
+
+    public function index()
+    {
+        $data = array(
+            'title'    =&gt; 'Daftar Produk',
+            'crumbs'   =&gt; array('Produk' =&gt; NULL),
+            'products' =&gt; $this-&gt;product_model-&gt;get_all(NULL, NULL, 'product_id DESC'),
+        );
+        $this-&gt;load-&gt;view('admin/products/index', $data);
+    }
+
+    public function add()
+    {
+        $this-&gt;form_validation-&gt;set_rules($this-&gt;product_model-&gt;rules());
+
+        if ($this-&gt;form_validation-&gt;run() === TRUE)
+        {
+            $data = $this-&gt;_form_data();
+
+            $image = $this-&gt;_upload_image($data['name']);
+            if ($image === FALSE)
+            {
+                return $this-&gt;_show_form('add', NULL);
+            }
+            $data['image'] = $image ?: 'default.png';
+
+            $this-&gt;product_model-&gt;insert($data);
+            $this-&gt;session-&gt;set_flashdata('success', 'Produk &lt;b&gt;'.html_escape($data['name']).'&lt;/b&gt; berhasil ditambahkan.');
+            redirect('admin/products');
+        }
+
+        $this-&gt;_show_form('add', NULL);
+    }
+
+    public function edit($id = NULL)
+    {
+        $product = $this-&gt;product_model-&gt;get_by_id($id);
+        if ( ! $product)
+        {
+            show_404();
+        }
+
+        $this-&gt;form_validation-&gt;set_rules($this-&gt;product_model-&gt;rules());
+
+        if ($this-&gt;form_validation-&gt;run() === TRUE)
+        {
+            $data = $this-&gt;_form_data();
+
+            $image = $this-&gt;_upload_image($data['name']);
+            if ($image === FALSE)
+            {
+                return $this-&gt;_show_form('edit', $product);
+            }
+            if ($image)
+            {
+                // gambar baru berhasil diupload, hapus gambar lama
+                $this-&gt;_delete_image($product-&gt;image);
+                $data['image'] = $image;
+            }
+
+            $this-&gt;product_model-&gt;update($product-&gt;product_id, $data);
+            $this-&gt;session-&gt;set_flashdata('success', 'Produk &lt;b&gt;'.html_escape($data['name']).'&lt;/b&gt; berhasil diperbarui.');
+            redirect('admin/products');
+        }
+
+        $this-&gt;_show_form('edit', $product);
+    }
+
+    public function delete()
+    {
+        // hapus hanya lewat POST (form + token CSRF), bukan lewat link GET
+        if ($this-&gt;input-&gt;method() !== 'post')
+        {
+            show_error('Metode tidak diizinkan', 405);
+        }
+        $this-&gt;only_role('admin');
+
+        $product = $this-&gt;product_model-&gt;get_by_id($this-&gt;input-&gt;post('product_id'));
+        if ($product)
+        {
+            $this-&gt;product_model-&gt;delete($product-&gt;product_id);
+            $this-&gt;_delete_image($product-&gt;image);
+            $this-&gt;session-&gt;set_flashdata('success', 'Produk &lt;b&gt;'.html_escape($product-&gt;name).'&lt;/b&gt; sudah dihapus.');
+        }
+        redirect('admin/products');
+    }
+
+    /* ------------------------------------------------------------------ */
+
+    private function _form_data()
+    {
+        return array(
+            'name'        =&gt; $this-&gt;input-&gt;post('name', TRUE),
+            'category'    =&gt; $this-&gt;input-&gt;post('category', TRUE),
+            'price'       =&gt; (int) $this-&gt;input-&gt;post('price'),
+            'unit'        =&gt; $this-&gt;input-&gt;post('unit', TRUE),
+            'stock'       =&gt; (int) $this-&gt;input-&gt;post('stock'),
+            'description' =&gt; $this-&gt;input-&gt;post('description', TRUE),
+        );
+    }
+
+    private function _show_form($mode, $product)
+    {
+        $label = $mode === 'add' ? 'Tambah Produk' : 'Edit Produk';
+        $this-&gt;load-&gt;view('admin/products/form', array(
+            'title'        =&gt; $label,
+            'crumbs'       =&gt; array('Produk' =&gt; 'admin/products', $label =&gt; NULL),
+            'mode'         =&gt; $mode,
+            'product'      =&gt; $product,
+            'upload_error' =&gt; isset($this-&gt;upload) ? $this-&gt;upload-&gt;display_errors('', '') : '',
+        ));
+    }
+
+    /**
+     * Upload gambar produk.
+     * @return string|null|false  nama file baru, NULL jika tidak ada file dipilih, FALSE jika gagal
+     */
+    private function _upload_image($product_name)
+    {
+        if (empty($_FILES['image']['name']))
+        {
+            return NULL;
+        }
+
+        $this-&gt;load-&gt;library('upload', array(
+            'upload_path'   =&gt; self::UPLOAD_DIR,
+            'allowed_types' =&gt; 'jpg|jpeg|png|webp',
+            'max_size'      =&gt; 2048, // KB
+            'file_name'     =&gt; url_title($product_name, '-', TRUE).'-'.time(),
+            'overwrite'     =&gt; FALSE,
+        ));
+
+        return $this-&gt;upload-&gt;do_upload('image') ? $this-&gt;upload-&gt;data('file_name') : FALSE;
+    }
+
+    private function _delete_image($filename)
+    {
+        $path = self::UPLOAD_DIR.basename($filename);
+        if ($filename &amp;&amp; $filename !== 'default.png' &amp;&amp; is_file($path))
+        {
+            unlink($path);
+        }
+    }
+}</code></pre>
+
+<h3>controllers/Auth.php — login &amp; logout</h3>
+<pre style="background:#1e1e1e;color:#d4d4d4;padding:12px;border-radius:6px;overflow-x:auto;font-size:13px;"><code>&lt;?php
+defined('BASEPATH') OR exit('No direct script access allowed');
+
+class Auth extends CI_Controller
+{
+    public function __construct()
+    {
+        parent::__construct();
+        $this-&gt;load-&gt;model('user_model');
+    }
+
+    public function login()
+    {
+        // sudah login? langsung ke dashboard
+        if ($this-&gt;session-&gt;userdata('logged_in'))
+        {
+            redirect('admin');
+        }
+
+        $this-&gt;form_validation-&gt;set_rules('login', 'Username / email', 'trim|required');
+        $this-&gt;form_validation-&gt;set_rules('password', 'Password', 'required');
+
+        if ($this-&gt;form_validation-&gt;run() === TRUE)
+        {
+            $user = $this-&gt;user_model-&gt;attempt(
+                $this-&gt;input-&gt;post('login', TRUE),
+                $this-&gt;input-&gt;post('password')
+            );
+
+            if ($user)
+            {
+                // ganti session id setelah login untuk mencegah session fixation
+                $this-&gt;session-&gt;sess_regenerate(TRUE);
+                $this-&gt;session-&gt;set_userdata(array(
+                    'logged_in' =&gt; TRUE,
+                    'user_id'   =&gt; $user-&gt;user_id,
+                    'username'  =&gt; $user-&gt;username,
+                    'full_name' =&gt; $user-&gt;full_name,
+                    'role'      =&gt; $user-&gt;role,
+                ));
+                $this-&gt;session-&gt;set_flashdata('success', 'Selamat datang, '.$user-&gt;full_name.'!');
+                redirect('admin');
+            }
+
+            $this-&gt;session-&gt;set_flashdata('danger', 'Username/email atau password salah.');
+            redirect('login');
+        }
+
+        $this-&gt;load-&gt;view('auth/login', array('title' =&gt; 'Login Admin - Tokobuah'));
+    }
+
+    public function logout()
+    {
+        $this-&gt;session-&gt;unset_userdata(array('logged_in', 'user_id', 'username', 'full_name', 'role'));
+        $this-&gt;session-&gt;set_flashdata('success', 'Anda sudah logout.');
+        redirect('login');
+    }
+}</code></pre>
+
+<h3>views/admin/products/index.php — memakai partial template</h3>
+<pre style="background:#1e1e1e;color:#d4d4d4;padding:12px;border-radius:6px;overflow-x:auto;font-size:13px;"><code>&lt;?php $this-&gt;load-&gt;view('admin/_partials/head'); ?&gt;
+&lt;?php $this-&gt;load-&gt;view('admin/_partials/navbar'); ?&gt;
+&lt;div id="layoutSidenav"&gt;
+    &lt;?php $this-&gt;load-&gt;view('admin/_partials/sidebar'); ?&gt;
+    &lt;div id="layoutSidenav_content"&gt;
+        &lt;main&gt;
+            &lt;div class="container-fluid px-4"&gt;
+                &lt;div class="d-flex justify-content-between align-items-center mt-4"&gt;
+                    &lt;h1 class="mb-0"&gt;Produk&lt;/h1&gt;
+                    &lt;a href="&lt;?= site_url('admin/products/add') ?&gt;" class="btn btn-primary"&gt;&lt;i class="fas fa-plus me-1"&gt;&lt;/i&gt; Tambah Produk&lt;/a&gt;
+                &lt;/div&gt;
+                &lt;?php $this-&gt;load-&gt;view('admin/_partials/breadcrumb'); ?&gt;
+                &lt;?php $this-&gt;load-&gt;view('admin/_partials/alert'); ?&gt;
+
+                &lt;div class="card mb-4"&gt;
+                    &lt;div class="card-header"&gt;&lt;i class="fas fa-table me-1"&gt;&lt;/i&gt; &lt;?= count($products) ?&gt; produk&lt;/div&gt;
+                    &lt;div class="card-body"&gt;
+                        &lt;table class="table table-hover align-middle datatable"&gt;
+                            &lt;thead&gt;
+                                &lt;tr&gt;
+                                    &lt;th&gt;Gambar&lt;/th&gt;&lt;th&gt;Nama&lt;/th&gt;&lt;th&gt;Kategori&lt;/th&gt;&lt;th&gt;Harga&lt;/th&gt;&lt;th&gt;Stok&lt;/th&gt;&lt;th&gt;Deskripsi&lt;/th&gt;&lt;th&gt;Aksi&lt;/th&gt;
+                                &lt;/tr&gt;
+                            &lt;/thead&gt;
+                            &lt;tbody&gt;
+                                &lt;?php foreach ($products as $p): ?&gt;
+                                    &lt;tr&gt;
+                                        &lt;td&gt;&lt;img class="thumb" src="&lt;?= base_url('upload/product/'.$p-&gt;image) ?&gt;" alt="&lt;?= html_escape($p-&gt;name) ?&gt;"&gt;&lt;/td&gt;
+                                        &lt;td class="fw-semibold"&gt;&lt;?= html_escape($p-&gt;name) ?&gt;&lt;/td&gt;
+                                        &lt;td&gt;&lt;span class="badge &lt;?= $p-&gt;category === 'Impor' ? 'bg-info text-dark' : 'bg-success' ?&gt;"&gt;&lt;?= $p-&gt;category ?&gt;&lt;/span&gt;&lt;/td&gt;
+                                        &lt;td&gt;&lt;?= rupiah($p-&gt;price) ?&gt; &lt;span class="text-muted small"&gt;/ &lt;?= $p-&gt;unit ?&gt;&lt;/span&gt;&lt;/td&gt;
+                                        &lt;td class="&lt;?= $p-&gt;stock &lt; 20 ? 'text-danger fw-bold' : '' ?&gt;"&gt;&lt;?= $p-&gt;stock ?&gt;&lt;/td&gt;
+                                        &lt;td class="small text-muted"&gt;&lt;?= html_escape(character_limiter((string) $p-&gt;description, 45, '…')) ?&gt;&lt;/td&gt;
+                                        &lt;td class="text-nowrap"&gt;
+                                            &lt;a href="&lt;?= site_url('admin/products/edit/'.$p-&gt;product_id) ?&gt;" class="btn btn-sm btn-outline-primary"&gt;&lt;i class="fas fa-pen"&gt;&lt;/i&gt; Edit&lt;/a&gt;
+                                            &lt;?php if ($user-&gt;role === 'admin'): ?&gt;
+                                                &lt;button type="button" class="btn btn-sm btn-outline-danger" data-bs-toggle="modal" data-bs-target="#modalHapus"
+                                                    data-id="&lt;?= $p-&gt;product_id ?&gt;" data-name="&lt;?= html_escape($p-&gt;name) ?&gt;"&gt;&lt;i class="fas fa-trash"&gt;&lt;/i&gt; Hapus&lt;/button&gt;
+                                            &lt;?php endif; ?&gt;
+                                        &lt;/td&gt;
+                                    &lt;/tr&gt;
+                                &lt;?php endforeach; ?&gt;
+                            &lt;/tbody&gt;
+                        &lt;/table&gt;
+                    &lt;/div&gt;
+                &lt;/div&gt;
+            &lt;/div&gt;
+        &lt;/main&gt;
+        &lt;?php $this-&gt;load-&gt;view('admin/_partials/footer'); ?&gt;
+    &lt;/div&gt;
+&lt;/div&gt;
+
+&lt;!-- Modal konfirmasi hapus: form POST + token CSRF dari form_open() --&gt;
+&lt;div class="modal fade" id="modalHapus" tabindex="-1" aria-hidden="true"&gt;
+    &lt;div class="modal-dialog modal-dialog-centered"&gt;
+        &lt;?= form_open('admin/products/delete', array('class' =&gt; 'modal-content')) ?&gt;
+            &lt;div class="modal-header"&gt;
+                &lt;h5 class="modal-title"&gt;&lt;i class="fas fa-triangle-exclamation text-danger me-1"&gt;&lt;/i&gt; Hapus produk?&lt;/h5&gt;
+                &lt;button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Tutup"&gt;&lt;/button&gt;
+            &lt;/div&gt;
+            &lt;div class="modal-body"&gt;
+                Produk &lt;b id="hapusNama"&gt;&lt;/b&gt; beserta gambarnya akan dihapus permanen.
+                &lt;input type="hidden" name="product_id" id="hapusId"&gt;
+            &lt;/div&gt;
+            &lt;div class="modal-footer"&gt;
+                &lt;button type="button" class="btn btn-secondary" data-bs-dismiss="modal"&gt;Batal&lt;/button&gt;
+                &lt;button type="submit" class="btn btn-danger"&gt;Ya, hapus&lt;/button&gt;
+            &lt;/div&gt;
+        &lt;?= form_close() ?&gt;
+    &lt;/div&gt;
+&lt;/div&gt;
+
+&lt;?php $this-&gt;load-&gt;view('admin/_partials/js'); ?&gt;
+&lt;script&gt;
+    document.getElementById('modalHapus').addEventListener('show.bs.modal', function (e) {
+        document.getElementById('hapusId').value = e.relatedTarget.dataset.id;
+        document.getElementById('hapusNama').textContent = e.relatedTarget.dataset.name;
+    });
+&lt;/script&gt;
+&lt;/body&gt;
+&lt;/html&gt;</code></pre>
+
+<h3>Hasil Latihan 1</h3>
+<p><i>[Sisipkan gambar: l1-01 sampai l1-18 — katalog, pencarian, detail, wajib login, login gagal, dashboard, daftar produk, validasi, upload ditolak, form upload, tambah/edit/hapus berhasil, role staff, phpMyAdmin]</i></p>
+
+<h3>Penjelasan</h3>
+<ul>
+<li><b>MY_Controller</b> otomatis dimuat CodeIgniter karena berawalan <code>MY_</code>. <code>Admin_Controller</code> memeriksa session di konstruktor, jadi setiap controller admin cukup <code>extends Admin_Controller</code>.</li>
+<li><b>_upload_image()</b> mengembalikan nama file (berhasil), <code>NULL</code> (tidak memilih file, gambar lama dipertahankan), atau <code>FALSE</code> (gagal, form tampil lagi dengan pesan error).</li>
+<li>Tombol <b>Hapus</b> membuka modal berisi <code>form_open()</code> sehingga terkirim lewat POST dengan token CSRF, bukan lewat link GET.</li>
+<li><code>set_value()</code>, <code>set_select()</code>, dan <code>set_radio()</code> mengisi ulang form ketika validasi gagal; semua output dicetak dengan <code>html_escape()</code>.</li>
+</ul>
+
+<!-- ===================================================== -->
+<h2>Latihan 2a — SIAKAD Presensi</h2>
+<p>SIAKAD ini berfokus pada <b>presensi kuliah</b>. Dosen membuka sesi pertemuan dan sistem membuat <b>kode presensi 6 karakter</b> yang berlaku selama durasi tertentu. Mahasiswa memasukkan kode itu untuk tercatat hadir. Ketika sesi ditutup, peserta yang belum presensi otomatis tercatat <b>Alpa</b>. Rekap kehadiran menentukan apakah mahasiswa <b>boleh mengikuti UAS (≥ 75%)</b>. Tampilan memakai <b>AdminLTE 3</b>.</p>
+
+<h3>Rancangan Tabel</h3>
+<ul>
+<li><b>users</b> — akun login (role admin/dosen/mahasiswa), terhubung ke <code>dosen_id</code> atau <code>mahasiswa_id</code>.</li>
+<li><b>mahasiswa</b>, <b>dosen</b>, <b>matakuliah</b> — master data.</li>
+<li><b>kelas</b> — mata kuliah + dosen + jadwal (hari, jam, ruang); <b>peserta_kelas</b> — relasi N–N mahasiswa dan kelas.</li>
+<li><b>pertemuan</b> — sesi tatap muka dengan kode, status dibuka/ditutup, dan batas waktu.</li>
+<li><b>presensi</b> — status H/I/S/A per mahasiswa per pertemuan (UNIQUE pertemuan + mahasiswa).</li>
+<li><b>pengumuman</b> — untuk semua/dosen/mahasiswa.</li>
+<li><b>VIEW v_rekap_kehadiran</b> — jumlah H/I/S/A dan persentase kehadiran per mahasiswa per kelas.</li>
+</ul>
+<pre style="background:#1e1e1e;color:#d4d4d4;padding:12px;border-radius:6px;overflow-x:auto;font-size:13px;"><code>-- =========================================================
+-- Latihan 2a - SIAKAD Presensi Kuliah (CodeIgniter 3)
+-- Database: pbkk_siakad
+-- Import lewat phpMyAdmin (tab Import) atau:
+--   mysql -u root &lt; siakad.sql
+-- Semua akun memakai password: siakad123
+-- =========================================================
+DROP DATABASE IF EXISTS pbkk_siakad;
+CREATE DATABASE pbkk_siakad CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;
+USE pbkk_siakad;
+
+CREATE TABLE dosen (
+    id     INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    nidn   CHAR(10)     NOT NULL UNIQUE,
+    nama   VARCHAR(100) NOT NULL,
+    email  VARCHAR(100) NOT NULL UNIQUE
+) ENGINE=InnoDB;
+
+CREATE TABLE mahasiswa (
+    id        INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    nim       CHAR(10)     NOT NULL UNIQUE,
+    nama      VARCHAR(100) NOT NULL,
+    gender    ENUM('L','P') NOT NULL,
+    prodi     VARCHAR(60)  NOT NULL DEFAULT 'Teknik Informatika',
+    angkatan  YEAR         NOT NULL,
+    email     VARCHAR(100) NOT NULL UNIQUE
+) ENGINE=InnoDB;
+
+-- Akun login. Satu akun terhubung ke dosen ATAU mahasiswa (admin tidak keduanya).
+CREATE TABLE users (
+    id            INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    username      VARCHAR(30)  NOT NULL UNIQUE,
+    password      VARCHAR(255) NOT NULL,
+    role          ENUM('admin','dosen','mahasiswa') NOT NULL,
+    nama          VARCHAR(100) NOT NULL,
+    dosen_id      INT UNSIGNED NULL,
+    mahasiswa_id  INT UNSIGNED NULL,
+    last_login    DATETIME     NULL,
+    CONSTRAINT fk_users_dosen     FOREIGN KEY (dosen_id)     REFERENCES dosen(id)     ON DELETE CASCADE,
+    CONSTRAINT fk_users_mahasiswa FOREIGN KEY (mahasiswa_id) REFERENCES mahasiswa(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+CREATE TABLE matakuliah (
+    id        INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    kode      CHAR(6)      NOT NULL UNIQUE,
+    nama      VARCHAR(100) NOT NULL,
+    sks       TINYINT UNSIGNED NOT NULL,
+    semester  TINYINT UNSIGNED NOT NULL
+) ENGINE=InnoDB;
+
+-- Kelas = mata kuliah yang dibuka pada satu tahun ajaran, lengkap dengan jadwalnya
+CREATE TABLE kelas (
+    id             INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    matakuliah_id  INT UNSIGNED NOT NULL,
+    dosen_id       INT UNSIGNED NOT NULL,
+    nama_kelas     CHAR(2)      NOT NULL DEFAULT 'A',
+    tahun_ajaran   VARCHAR(20)  NOT NULL,
+    hari           ENUM('Senin','Selasa','Rabu','Kamis','Jumat','Sabtu') NOT NULL,
+    jam_mulai      TIME         NOT NULL,
+    jam_selesai    TIME         NOT NULL,
+    ruang          VARCHAR(20)  NOT NULL,
+    UNIQUE KEY uq_kelas (matakuliah_id, nama_kelas, tahun_ajaran),
+    CONSTRAINT fk_kelas_mk    FOREIGN KEY (matakuliah_id) REFERENCES matakuliah(id),
+    CONSTRAINT fk_kelas_dosen FOREIGN KEY (dosen_id)      REFERENCES dosen(id)
+) ENGINE=InnoDB;
+
+CREATE TABLE peserta_kelas (
+    kelas_id      INT UNSIGNED NOT NULL,
+    mahasiswa_id  INT UNSIGNED NOT NULL,
+    PRIMARY KEY (kelas_id, mahasiswa_id),
+    CONSTRAINT fk_peserta_kelas FOREIGN KEY (kelas_id)     REFERENCES kelas(id)     ON DELETE CASCADE,
+    CONSTRAINT fk_peserta_mhs   FOREIGN KEY (mahasiswa_id) REFERENCES mahasiswa(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+-- Satu sesi tatap muka. Dosen membuka sesi -&gt; muncul kode presensi yang berlaku sampai berakhir_at.
+CREATE TABLE pertemuan (
+    id            INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    kelas_id      INT UNSIGNED NOT NULL,
+    pertemuan_ke  TINYINT UNSIGNED NOT NULL,
+    tanggal       DATE         NOT NULL,
+    topik         VARCHAR(150) NOT NULL,
+    kode          CHAR(6)      NOT NULL,
+    status        ENUM('dibuka','ditutup') NOT NULL DEFAULT 'dibuka',
+    dibuka_at     DATETIME     NOT NULL,
+    berakhir_at   DATETIME     NOT NULL,
+    UNIQUE KEY uq_pertemuan (kelas_id, pertemuan_ke),
+    CONSTRAINT fk_pertemuan_kelas FOREIGN KEY (kelas_id) REFERENCES kelas(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+-- H = hadir, I = izin, S = sakit, A = alpa (otomatis saat sesi ditutup)
+CREATE TABLE presensi (
+    id            INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    pertemuan_id  INT UNSIGNED NOT NULL,
+    mahasiswa_id  INT UNSIGNED NOT NULL,
+    status        ENUM('H','I','S','A') NOT NULL,
+    waktu         DATETIME     NULL,
+    keterangan    VARCHAR(150) NULL,
+    UNIQUE KEY uq_presensi (pertemuan_id, mahasiswa_id),
+    CONSTRAINT fk_presensi_pertemuan FOREIGN KEY (pertemuan_id) REFERENCES pertemuan(id) ON DELETE CASCADE,
+    CONSTRAINT fk_presensi_mhs       FOREIGN KEY (mahasiswa_id) REFERENCES mahasiswa(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+CREATE TABLE pengumuman (
+    id          INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    judul       VARCHAR(150) NOT NULL,
+    isi         TEXT         NOT NULL,
+    untuk       ENUM('semua','dosen','mahasiswa') NOT NULL DEFAULT 'semua',
+    user_id     INT UNSIGNED NOT NULL,
+    created_at  DATETIME     NOT NULL,
+    CONSTRAINT fk_pengumuman_user FOREIGN KEY (user_id) REFERENCES users(id)
+) ENGINE=InnoDB;
+
+-- View rekap kehadiran per mahasiswa per kelas.
+-- Dihitung dari pertemuan yang sudah ditutup dan tercatat untuk mahasiswa tersebut
+-- (saat sesi ditutup semua peserta pasti tercatat, minimal sebagai Alpa), sehingga
+-- mahasiswa yang baru ditambahkan ke kelas tidak dihitung absen untuk pertemuan sebelumnya.
+CREATE VIEW v_rekap_kehadiran AS
+SELECT pk.kelas_id, pk.mahasiswa_id,
+       COUNT(pr.id)                       AS total_pertemuan,
+       COALESCE(SUM(pr.status = 'H'), 0)  AS hadir,
+       COALESCE(SUM(pr.status = 'I'), 0)  AS izin,
+       COALESCE(SUM(pr.status = 'S'), 0)  AS sakit,
+       COALESCE(SUM(pr.status = 'A'), 0)  AS alpa,
+       ROUND(COALESCE(SUM(pr.status = 'H'), 0) / NULLIF(COUNT(pr.id), 0) * 100, 1) AS persen
+FROM peserta_kelas pk
+LEFT JOIN pertemuan p ON p.kelas_id = pk.kelas_id AND p.status = 'ditutup'
+LEFT JOIN presensi pr ON pr.pertemuan_id = p.id AND pr.mahasiswa_id = pk.mahasiswa_id
+GROUP BY pk.kelas_id, pk.mahasiswa_id;</code></pre>
+
+<h3>Fitur per Role</h3>
+<ul>
+<li><b>Admin</b>: dashboard (daftar mahasiswa di bawah 75%, sesi yang sedang dibuka), CRUD mahasiswa &amp; dosen (akun login dibuat otomatis), CRUD mata kuliah, kelas &amp; jadwal, atur peserta kelas, pengumuman.</li>
+<li><b>Dosen</b>: jadwal mengajar hari ini, buka sesi → kode presensi + hitung mundur, daftar hadir, ubah status izin/sakit, tutup sesi, rekap matriks kehadiran + status UAS.</li>
+<li><b>Mahasiswa</b>: notifikasi sesi yang dibuka, isi presensi dengan kode, jadwal mingguan, rekap kehadiran + status UAS, riwayat presensi.</li>
+</ul>
+
+<h3>core/MY_Controller.php — layout render &amp; hak akses per role</h3>
+<pre style="background:#1e1e1e;color:#d4d4d4;padding:12px;border-radius:6px;overflow-x:auto;font-size:13px;"><code>&lt;?php
+defined('BASEPATH') OR exit('No direct script access allowed');
+
+/**
+ * Controller dasar aplikasi.
+ * render() membungkus view halaman ke dalam layout AdminLTE (views/layouts/app.php),
+ * jadi view halaman cukup berisi konten utamanya saja.
+ */
+class MY_Controller extends CI_Controller
+{
+    protected function render($view, array $data = array())
+    {
+        $data['content'] = $this-&gt;load-&gt;view($view, $data, TRUE);
+        $this-&gt;load-&gt;view('layouts/app', $data);
+    }
+
+    protected function flash($type, $message)
+    {
+        $this-&gt;session-&gt;set_flashdata('flash', array('type' =&gt; $type, 'message' =&gt; $message));
+    }
+}
+
+/**
+ * Controller yang wajib login. Turunan class ini bisa membatasi role dengan
+ * properti $role, mis. protected $role = 'admin';
+ */
+class Auth_Controller extends MY_Controller
+{
+    /** @var string|null role yang boleh mengakses controller ini (NULL = semua role) */
+    protected $role = NULL;
+
+    /** @var object akun yang sedang login */
+    protected $me;
+
+    public function __construct()
+    {
+        parent::__construct();
+
+        $id = $this-&gt;session-&gt;userdata('user_id');
+        $this-&gt;load-&gt;model('user_model');
+        $this-&gt;me = $id ? $this-&gt;user_model-&gt;find($id) : NULL;
+
+        if ( ! $this-&gt;me)
+        {
+            $this-&gt;flash('warning', 'Sesi berakhir, silakan login kembali.');
+            redirect('login');
+        }
+        if ($this-&gt;role !== NULL &amp;&amp; $this-&gt;me-&gt;role !== $this-&gt;role)
+        {
+            show_error('Halaman ini khusus untuk '.$this-&gt;role.'.', 403, 'Akses ditolak');
+        }
+
+        $this-&gt;load-&gt;vars(array('me' =&gt; $this-&gt;me));
+    }
+
+    /** Pastikan request memakai POST (untuk aksi yang mengubah data) */
+    protected function require_post()
+    {
+        if ($this-&gt;input-&gt;method() !== 'post')
+        {
+            show_error('Metode tidak diizinkan.', 405);
+        }
+    }
+}
+
+/**
+ * Dasar controller master data milik admin.
+ * Menyediakan callback validasi "unik kecuali data yang sedang diedit".
+ */
+class Admin_Controller extends Auth_Controller
+{
+    protected $role = 'admin';
+
+    /** model yang dipakai callback _unique_except */
+    protected $crud_model;
+
+    /** id data yang sedang diedit */
+    protected $edit_id;
+
+    public function _unique_except($value, $field)
+    {
+        if ($this-&gt;crud_model-&gt;exists_except($field, $value, $this-&gt;edit_id))
+        {
+            $this-&gt;form_validation-&gt;set_message('_unique_except', '{field} sudah dipakai data lain.');
+            return FALSE;
+        }
+        return TRUE;
+    }
+}
+
+class Dosen_Controller extends Auth_Controller
+{
+    protected $role = 'dosen';
+}
+
+class Mahasiswa_Controller extends Auth_Controller
+{
+    protected $role = 'mahasiswa';
+}</code></pre>
+
+<h3>core/MY_Model.php — CRUD generik</h3>
+<pre style="background:#1e1e1e;color:#d4d4d4;padding:12px;border-radius:6px;overflow-x:auto;font-size:13px;"><code>&lt;?php
+defined('BASEPATH') OR exit('No direct script access allowed');
+
+/**
+ * Model dasar berisi operasi CRUD yang sama untuk semua tabel.
+ * Model turunan cukup mengisi $table (dan $order bila perlu).
+ */
+class MY_Model extends CI_Model
+{
+    protected $table;
+    protected $primary_key = 'id';
+    protected $order = 'id ASC';
+
+    public function all()
+    {
+        return $this-&gt;db-&gt;order_by($this-&gt;order)-&gt;get($this-&gt;table)-&gt;result();
+    }
+
+    public function find($id)
+    {
+        return $this-&gt;db-&gt;get_where($this-&gt;table, array($this-&gt;primary_key =&gt; $id))-&gt;row();
+    }
+
+    public function insert(array $data)
+    {
+        $this-&gt;db-&gt;insert($this-&gt;table, $data);
+        return $this-&gt;db-&gt;insert_id();
+    }
+
+    public function update($id, array $data)
+    {
+        return $this-&gt;db-&gt;update($this-&gt;table, $data, array($this-&gt;primary_key =&gt; $id));
+    }
+
+    public function delete($id)
+    {
+        return $this-&gt;db-&gt;delete($this-&gt;table, array($this-&gt;primary_key =&gt; $id));
+    }
+
+    public function count()
+    {
+        return $this-&gt;db-&gt;count_all($this-&gt;table);
+    }
+
+    /** Pilihan untuk dropdown: array(id =&gt; label) */
+    public function dropdown($label_field)
+    {
+        $options = array();
+        foreach ($this-&gt;all() as $row)
+        {
+            $options[$row-&gt;{$this-&gt;primary_key}] = $row-&gt;$label_field;
+        }
+        return $options;
+    }
+}</code></pre>
+
+<h3>models/Pertemuan_model.php — kode presensi, buka &amp; tutup sesi</h3>
+<pre style="background:#1e1e1e;color:#d4d4d4;padding:12px;border-radius:6px;overflow-x:auto;font-size:13px;"><code>&lt;?php
+defined('BASEPATH') OR exit('No direct script access allowed');
+
+/**
+ * Sesi pertemuan kuliah + logika kode presensi.
+ */
+class Pertemuan_model extends MY_Model
+{
+    protected $table = 'pertemuan';
+
+    /** Huruf yang mudah dibaca (tanpa O/0, I/1) */
+    const ALFABET_KODE = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+
+    public function by_kelas($kelas_id)
+    {
+        return $this-&gt;db-&gt;select("p.*,
+                SUM(pr.status = 'H') AS hadir,
+                COUNT(pr.id) AS tercatat", FALSE)
+            -&gt;from('pertemuan p')
+            -&gt;join('presensi pr', 'pr.pertemuan_id = p.id', 'left')
+            -&gt;where('p.kelas_id', $kelas_id)
+            -&gt;group_by('p.id')
+            -&gt;order_by('p.pertemuan_ke', 'DESC')
+            -&gt;get()-&gt;result();
+    }
+
+    /** Sesi yang sedang dibuka pada suatu kelas (maks. satu) */
+    public function aktif($kelas_id)
+    {
+        return $this-&gt;db-&gt;where(array('kelas_id' =&gt; $kelas_id, 'status' =&gt; 'dibuka'))
+            -&gt;get($this-&gt;table)-&gt;row();
+    }
+
+    public function next_number($kelas_id)
+    {
+        $row = $this-&gt;db-&gt;select_max('pertemuan_ke')-&gt;get_where($this-&gt;table, array('kelas_id' =&gt; $kelas_id))-&gt;row();
+        return (int) $row-&gt;pertemuan_ke + 1;
+    }
+
+    /**
+     * Buka sesi baru: buat kode acak 6 karakter yang berlaku $durasi menit.
+     */
+    public function buka($kelas_id, $topik, $durasi)
+    {
+        $now = time();
+        $id = $this-&gt;insert(array(
+            'kelas_id'     =&gt; $kelas_id,
+            'pertemuan_ke' =&gt; $this-&gt;next_number($kelas_id),
+            'tanggal'      =&gt; date('Y-m-d', $now),
+            'topik'        =&gt; $topik,
+            'kode'         =&gt; $this-&gt;generate_kode(),
+            'status'       =&gt; 'dibuka',
+            'dibuka_at'    =&gt; date('Y-m-d H:i:s', $now),
+            'berakhir_at'  =&gt; date('Y-m-d H:i:s', $now + $durasi * 60),
+        ));
+        return $this-&gt;find($id);
+    }
+
+    /**
+     * Tutup sesi. Peserta yang belum presensi otomatis dicatat Alpa (A).
+     * INSERT IGNORE + UNIQUE(pertemuan_id, mahasiswa_id) menjaga presensi yang sudah ada.
+     */
+    public function tutup($pertemuan)
+    {
+        $this-&gt;db-&gt;trans_start();
+        $this-&gt;db-&gt;update($this-&gt;table, array(
+            'status'      =&gt; 'ditutup',
+            'berakhir_at' =&gt; min($pertemuan-&gt;berakhir_at, date('Y-m-d H:i:s')),
+        ), array('id' =&gt; $pertemuan-&gt;id));
+
+        $this-&gt;db-&gt;query(
+            "INSERT IGNORE INTO presensi (pertemuan_id, mahasiswa_id, status)
+             SELECT ?, pk.mahasiswa_id, 'A' FROM peserta_kelas pk WHERE pk.kelas_id = ?",
+            array($pertemuan-&gt;id, $pertemuan-&gt;kelas_id)
+        );
+        $this-&gt;db-&gt;trans_complete();
+    }
+
+    /** Sesi yang melewati batas waktu ditutup otomatis (dipanggil saat halaman terkait dibuka). */
+    public function tutup_kedaluwarsa()
+    {
+        $expired = $this-&gt;db-&gt;where('status', 'dibuka')
+            -&gt;where('berakhir_at &lt;', date('Y-m-d H:i:s'))
+            -&gt;get($this-&gt;table)-&gt;result();
+        foreach ($expired as $p)
+        {
+            $this-&gt;tutup($p);
+        }
+    }
+
+    /** Cari sesi aktif berdasarkan kode yang diketik mahasiswa */
+    public function cari_kode_aktif($kode)
+    {
+        return $this-&gt;db-&gt;where('kode', strtoupper(trim($kode)))
+            -&gt;where('status', 'dibuka')
+            -&gt;where('berakhir_at &gt;=', date('Y-m-d H:i:s'))
+            -&gt;get($this-&gt;table)-&gt;row();
+    }
+
+    /** Sesi aktif dari kelas-kelas yang diikuti seorang mahasiswa */
+    public function aktif_untuk_mahasiswa($mahasiswa_id)
+    {
+        return $this-&gt;db-&gt;select('p.*, mk.nama AS matakuliah, d.nama AS dosen, pr.status AS status_saya')
+            -&gt;from('pertemuan p')
+            -&gt;join('kelas k', 'k.id = p.kelas_id')
+            -&gt;join('matakuliah mk', 'mk.id = k.matakuliah_id')
+            -&gt;join('dosen d', 'd.id = k.dosen_id')
+            -&gt;join('peserta_kelas pk', 'pk.kelas_id = k.id AND pk.mahasiswa_id = '.(int) $mahasiswa_id)
+            -&gt;join('presensi pr', 'pr.pertemuan_id = p.id AND pr.mahasiswa_id = '.(int) $mahasiswa_id, 'left')
+            -&gt;where('p.status', 'dibuka')
+            -&gt;where('p.berakhir_at &gt;=', date('Y-m-d H:i:s'))
+            -&gt;get()-&gt;result();
+    }
+
+    /** Semua sesi yang sedang dibuka (untuk dashboard admin) */
+    public function semua_aktif()
+    {
+        return $this-&gt;db-&gt;select('p.*, mk.nama AS matakuliah, d.nama AS dosen, k.ruang')
+            -&gt;from('pertemuan p')
+            -&gt;join('kelas k', 'k.id = p.kelas_id')
+            -&gt;join('matakuliah mk', 'mk.id = k.matakuliah_id')
+            -&gt;join('dosen d', 'd.id = k.dosen_id')
+            -&gt;where('p.status', 'dibuka')
+            -&gt;get()-&gt;result();
+    }
+
+    private function generate_kode()
+    {
+        do
+        {
+            $kode = '';
+            for ($i = 0; $i &lt; 6; $i++)
+            {
+                $kode .= self::ALFABET_KODE[random_int(0, strlen(self::ALFABET_KODE) - 1)];
+            }
+            // pastikan tidak bentrok dengan sesi lain yang masih dibuka
+            $bentrok = $this-&gt;db-&gt;where(array('kode' =&gt; $kode, 'status' =&gt; 'dibuka'))-&gt;count_all_results($this-&gt;table);
+        }
+        while ($bentrok);
+
+        return $kode;
+    }
+}</code></pre>
+
+<h3>controllers/mahasiswa/Presensi.php — mengirim kode</h3>
+<pre style="background:#1e1e1e;color:#d4d4d4;padding:12px;border-radius:6px;overflow-x:auto;font-size:13px;"><code>&lt;?php
+defined('BASEPATH') OR exit('No direct script access allowed');
+
+/**
+ * Mahasiswa mengisi presensi dengan kode dari dosen.
+ */
+class Presensi extends Mahasiswa_Controller
+{
+    public function __construct()
+    {
+        parent::__construct();
+        $this-&gt;load-&gt;model(array('kelas_model', 'pertemuan_model', 'presensi_model'));
+        $this-&gt;pertemuan_model-&gt;tutup_kedaluwarsa();
+    }
+
+    public function index()
+    {
+        $this-&gt;render('mahasiswa/presensi', array(
+            'title'      =&gt; 'Isi Presensi',
+            'sesi_aktif' =&gt; $this-&gt;pertemuan_model-&gt;aktif_untuk_mahasiswa($this-&gt;me-&gt;mahasiswa_id),
+        ));
+    }
+
+    public function kirim()
+    {
+        $this-&gt;require_post();
+        $this-&gt;form_validation-&gt;set_rules('kode', 'Kode presensi', 'trim|required|alpha_numeric|exact_length[6]');
+        if ( ! $this-&gt;form_validation-&gt;run())
+        {
+            $this-&gt;flash('danger', strip_tags(form_error('kode')));
+            redirect('mahasiswa/presensi');
+        }
+
+        $mid  = $this-&gt;me-&gt;mahasiswa_id;
+        $sesi = $this-&gt;pertemuan_model-&gt;cari_kode_aktif($this-&gt;input-&gt;post('kode'));
+
+        // pengecekan berurutan agar pesan kesalahannya jelas
+        if ( ! $sesi)
+        {
+            $this-&gt;flash('danger', 'Kode tidak ditemukan atau sesi presensi sudah ditutup.');
+        }
+        elseif ( ! $this-&gt;kelas_model-&gt;is_peserta($sesi-&gt;kelas_id, $mid))
+        {
+            $this-&gt;flash('danger', 'Anda bukan peserta kelas untuk kode tersebut.');
+        }
+        elseif ($this-&gt;presensi_model-&gt;sudah_presensi($sesi-&gt;id, $mid))
+        {
+            $this-&gt;flash('info', 'Anda sudah tercatat pada pertemuan ini.');
+        }
+        else
+        {
+            $this-&gt;presensi_model-&gt;catat_hadir($sesi-&gt;id, $mid);
+            $kelas = $this-&gt;kelas_model-&gt;detail($sesi-&gt;kelas_id);
+            $this-&gt;flash('success', 'Presensi berhasil! Anda tercatat &lt;b&gt;hadir&lt;/b&gt; di '.html_escape($kelas-&gt;matakuliah)
+                .' pertemuan ke-'.$sesi-&gt;pertemuan_ke.' pukul '.date('H:i').'.');
+        }
+        redirect('mahasiswa/presensi');
+    }
+}</code></pre>
+
+<h3>controllers/dosen/Mengajar.php — halaman dosen</h3>
+<pre style="background:#1e1e1e;color:#d4d4d4;padding:12px;border-radius:6px;overflow-x:auto;font-size:13px;"><code>&lt;?php
+defined('BASEPATH') OR exit('No direct script access allowed');
+
+/**
+ * Halaman dosen: kelas yang diampu, buka/tutup sesi presensi, ubah status, rekap.
+ *   /dosen/mengajar                 daftar kelas
+ *   /dosen/mengajar/kelas/4         detail kelas + riwayat pertemuan
+ *   /dosen/mengajar/buka/4          (POST) buka sesi baru
+ *   /dosen/mengajar/sesi/41         kode presensi + daftar hadir
+ *   /dosen/mengajar/status/41       (POST) simpan status izin/sakit/alpa
+ *   /dosen/mengajar/tutup/41        (POST) tutup sesi
+ *   /dosen/mengajar/rekap/4         rekap kehadiran &amp; kelayakan UAS
+ */
+class Mengajar extends Dosen_Controller
+{
+    public function __construct()
+    {
+        parent::__construct();
+        $this-&gt;load-&gt;model(array('kelas_model', 'pertemuan_model', 'presensi_model'));
+        $this-&gt;pertemuan_model-&gt;tutup_kedaluwarsa();
+    }
+
+    public function index()
+    {
+        $kelas = $this-&gt;kelas_model-&gt;by_dosen($this-&gt;me-&gt;dosen_id);
+        foreach ($kelas as $k)
+        {
+            $k-&gt;sesi_aktif = $this-&gt;pertemuan_model-&gt;aktif($k-&gt;id);
+        }
+        $this-&gt;render('dosen/index', array('title' =&gt; 'Kelas yang Saya Ampu', 'kelas' =&gt; $kelas));
+    }
+
+    public function kelas($id = NULL)
+    {
+        $kelas = $this-&gt;_kelas_saya($id);
+        $this-&gt;render('dosen/kelas', array(
+            'title'      =&gt; $kelas-&gt;matakuliah,
+            'kelas'      =&gt; $kelas,
+            'pertemuan'  =&gt; $this-&gt;pertemuan_model-&gt;by_kelas($kelas-&gt;id),
+            'sesi_aktif' =&gt; $this-&gt;pertemuan_model-&gt;aktif($kelas-&gt;id),
+            'berikutnya' =&gt; $this-&gt;pertemuan_model-&gt;next_number($kelas-&gt;id),
+        ));
+    }
+
+    public function buka($id = NULL)
+    {
+        $this-&gt;require_post();
+        $kelas = $this-&gt;_kelas_saya($id);
+
+        if ($this-&gt;pertemuan_model-&gt;aktif($kelas-&gt;id))
+        {
+            $this-&gt;flash('warning', 'Masih ada sesi yang dibuka di kelas ini. Tutup dulu sebelum membuka sesi baru.');
+            redirect('dosen/mengajar/kelas/'.$kelas-&gt;id);
+        }
+
+        $this-&gt;form_validation-&gt;set_rules('topik', 'Topik', 'trim|required|max_length[150]');
+        $this-&gt;form_validation-&gt;set_rules('durasi', 'Durasi', 'required|in_list[10,15,30,60,90]');
+        if ( ! $this-&gt;form_validation-&gt;run())
+        {
+            $this-&gt;flash('danger', validation_errors(' ', ' '));
+            redirect('dosen/mengajar/kelas/'.$kelas-&gt;id);
+        }
+
+        $sesi = $this-&gt;pertemuan_model-&gt;buka($kelas-&gt;id, $this-&gt;input-&gt;post('topik', TRUE), (int) $this-&gt;input-&gt;post('durasi'));
+        $this-&gt;flash('success', 'Sesi pertemuan ke-'.$sesi-&gt;pertemuan_ke.' dibuka. Tampilkan kode &lt;b&gt;'.$sesi-&gt;kode.'&lt;/b&gt; kepada mahasiswa.');
+        redirect('dosen/mengajar/sesi/'.$sesi-&gt;id);
+    }
+
+    public function sesi($id = NULL)
+    {
+        list($sesi, $kelas) = $this-&gt;_sesi_saya($id);
+        $daftar = $this-&gt;presensi_model-&gt;daftar_pertemuan($sesi);
+
+        $this-&gt;render('dosen/sesi', array(
+            'title'  =&gt; 'Pertemuan ke-'.$sesi-&gt;pertemuan_ke,
+            'sesi'   =&gt; $sesi,
+            'kelas'  =&gt; $kelas,
+            'daftar' =&gt; $daftar,
+            'hadir'  =&gt; count(array_filter($daftar, function ($d) { return $d-&gt;status === 'H'; })),
+        ));
+    }
+
+    public function status($id = NULL)
+    {
+        $this-&gt;require_post();
+        list($sesi, $kelas) = $this-&gt;_sesi_saya($id);
+
+        $status     = (array) $this-&gt;input-&gt;post('status');
+        $keterangan = (array) $this-&gt;input-&gt;post('keterangan');
+        $peserta    = $this-&gt;kelas_model-&gt;peserta_ids($kelas-&gt;id);
+        $diubah = 0;
+
+        foreach ($status as $mahasiswa_id =&gt; $st)
+        {
+            // abaikan data yang tidak valid / bukan peserta kelas ini
+            if ($st === '' || ! isset(Presensi_model::STATUS[$st]) || ! in_array((int) $mahasiswa_id, $peserta, TRUE))
+            {
+                continue;
+            }
+            $ket = trim(strip_tags((string) (isset($keterangan[$mahasiswa_id]) ? $keterangan[$mahasiswa_id] : '')));
+            $this-&gt;presensi_model-&gt;simpan_status($sesi-&gt;id, (int) $mahasiswa_id, $st, mb_substr($ket, 0, 150));
+            $diubah++;
+        }
+
+        $this-&gt;flash('success', 'Status presensi disimpan ('.$diubah.' mahasiswa).');
+        redirect('dosen/mengajar/sesi/'.$sesi-&gt;id);
+    }
+
+    public function tutup($id = NULL)
+    {
+        $this-&gt;require_post();
+        list($sesi, $kelas) = $this-&gt;_sesi_saya($id);
+
+        if ($sesi-&gt;status === 'dibuka')
+        {
+            $this-&gt;pertemuan_model-&gt;tutup($sesi);
+            $this-&gt;flash('success', 'Sesi ditutup. Mahasiswa yang belum presensi otomatis tercatat &lt;b&gt;Alpa&lt;/b&gt;.');
+        }
+        redirect('dosen/mengajar/sesi/'.$sesi-&gt;id);
+    }
+
+    public function rekap($id = NULL)
+    {
+        $kelas = $this-&gt;_kelas_saya($id);
+        $pertemuan = array_reverse($this-&gt;pertemuan_model-&gt;by_kelas($kelas-&gt;id));
+
+        $this-&gt;render('dosen/rekap', array(
+            'title'     =&gt; 'Rekap Kehadiran',
+            'kelas'     =&gt; $kelas,
+            'pertemuan' =&gt; $pertemuan,
+            'rekap'     =&gt; $this-&gt;presensi_model-&gt;rekap_kelas($kelas-&gt;id),
+            'matriks'   =&gt; $this-&gt;presensi_model-&gt;matriks_kelas($kelas-&gt;id),
+        ));
+    }
+
+    /* ---------- otorisasi: dosen hanya boleh mengakses kelasnya sendiri ---------- */
+
+    private function _kelas_saya($id)
+    {
+        $kelas = $this-&gt;kelas_model-&gt;detail((int) $id);
+        if ( ! $kelas || (int) $kelas-&gt;dosen_id !== (int) $this-&gt;me-&gt;dosen_id)
+        {
+            show_404();
+        }
+        return $kelas;
+    }
+
+    private function _sesi_saya($id)
+    {
+        $sesi = $this-&gt;pertemuan_model-&gt;find((int) $id) OR show_404();
+        return array($sesi, $this-&gt;_kelas_saya($sesi-&gt;kelas_id));
+    }
+}</code></pre>
+
+<h3>Hasil Latihan 2a</h3>
+<p><i>[Sisipkan gambar: l2s-01 sampai l2s-23 — login, dashboard admin, data mahasiswa, validasi, kelas &amp; jadwal, peserta, pengumuman, dashboard dosen, buka sesi, kode presensi, dashboard mahasiswa, kode salah, presensi berhasil, sudah presensi, daftar hadir, sesi ditutup, rekap kelas, rekap mahasiswa, riwayat, jadwal mingguan, phpMyAdmin]</i></p>
+
+<h3>Penjelasan</h3>
+<ul>
+<li><b>render()</b> me-render view halaman ke string (<code>$this-&gt;load-&gt;view($view, $data, TRUE)</code>) lalu menyisipkannya ke <code>layouts/app.php</code>, jadi view halaman hanya berisi konten.</li>
+<li><b>Auth_Controller</b> mewajibkan login dan mengecek properti <code>$role</code>. Selain itu ada otorisasi data: dosen hanya bisa membuka kelasnya sendiri, mahasiswa hanya kelas yang ia ikuti; selain itu muncul 403/404.</li>
+<li><b>Kode presensi</b> dibuat dengan <code>random_int()</code> dari alfabet tanpa karakter mirip (O/0, I/1) dan dicek agar tidak bentrok dengan sesi lain yang masih dibuka.</li>
+<li><b>Tutup sesi</b> berjalan dalam transaksi: status diubah, lalu <code>INSERT IGNORE ... SELECT</code> mencatat Alpa untuk peserta yang belum presensi. Sesi yang lewat batas waktu juga ditutup otomatis saat halaman terkait dibuka.</li>
+<li><b>Persentase kehadiran</b> dihitung oleh SQL VIEW dari pertemuan yang tercatat untuk mahasiswa tersebut, sehingga mahasiswa yang baru ditambahkan di tengah semester tidak dianggap absen pada pertemuan sebelumnya.</li>
+<li><b>Callback validasi</b> buatan sendiri: <code>_unique_except</code>, <code>_setelah_jam_mulai</code>, dan <code>_cek_password_lama</code>.</li>
+</ul>
+
+<!-- ===================================================== -->
+<h2>Latihan 2b — MerchHima: Preorder Merchandise Himpunan</h2>
+<p>Toko online untuk <b>preorder merchandise himpunan</b>. Barang baru diproduksi setelah PO ditutup, sehingga fokus aplikasinya adalah <b>batch PO bertenggat</b>, <b>pilihan ukuran S–XXL</b>, <b>verifikasi bukti transfer</b>, dan <b>rekap jumlah produksi per ukuran</b> untuk vendor. Halaman pembeli memakai AdminLTE varian <i>top navigation</i>, halaman admin memakai sidebar.</p>
+
+<h3>Rancangan Tabel</h3>
+<ul>
+<li><b>users</b> — admin &amp; pembeli (registrasi mandiri, nomor WhatsApp).</li>
+<li><b>batch_po</b> — gelombang PO dengan waktu buka/tutup, estimasi pengambilan, rekening. Status dihitung dari tanggal sehingga PO tertutup otomatis.</li>
+<li><b>produk</b> — harga, foto, <code>pakai_ukuran</code>, <code>kuota</code> (NULL = tanpa batas).</li>
+<li><b>pesanan</b> — kode, total, status, bukti bayar, alasan penolakan; <b>pesanan_item</b> — produk, ukuran, qty, harga saat checkout.</li>
+</ul>
+<pre style="background:#1e1e1e;color:#d4d4d4;padding:12px;border-radius:6px;overflow-x:auto;font-size:13px;"><code>-- =========================================================
+-- Latihan 2b - MerchHima: Preorder Merchandise Himpunan (CodeIgniter 3)
+-- Database: pbkk_merchpo
+-- Import lewat phpMyAdmin (tab Import) atau:
+--   mysql -u root &lt; merch_po.sql
+-- Semua akun memakai password: merch123
+-- =========================================================
+DROP DATABASE IF EXISTS pbkk_merchpo;
+CREATE DATABASE pbkk_merchpo CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;
+USE pbkk_merchpo;
+
+CREATE TABLE users (
+    id          INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    nama        VARCHAR(100) NOT NULL,
+    email       VARCHAR(100) NOT NULL UNIQUE,
+    no_wa       VARCHAR(20)  NOT NULL,
+    password    VARCHAR(255) NOT NULL,
+    role        ENUM('admin','pembeli') NOT NULL DEFAULT 'pembeli',
+    created_at  DATETIME     NOT NULL
+) ENGINE=InnoDB;
+
+-- Satu gelombang preorder. Status (segera/dibuka/ditutup) dihitung dari tanggal.
+CREATE TABLE batch_po (
+    id              INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    nama            VARCHAR(100) NOT NULL,
+    deskripsi       TEXT,
+    dibuka_at       DATETIME     NOT NULL,
+    ditutup_at      DATETIME     NOT NULL,
+    estimasi_ambil  DATE         NOT NULL,
+    rekening        VARCHAR(150) NOT NULL,
+    CHECK (ditutup_at &gt; dibuka_at)
+) ENGINE=InnoDB;
+
+CREATE TABLE produk (
+    id            INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    batch_id      INT UNSIGNED NOT NULL,
+    nama          VARCHAR(100) NOT NULL,
+    deskripsi     TEXT,
+    harga         INT UNSIGNED NOT NULL,
+    gambar        VARCHAR(255) NOT NULL DEFAULT 'default.png',
+    pakai_ukuran  TINYINT(1)   NOT NULL DEFAULT 0,       -- 1 = pembeli wajib memilih S-XXL
+    kuota         INT UNSIGNED NULL,                     -- NULL = tanpa batas
+    CONSTRAINT fk_produk_batch FOREIGN KEY (batch_id) REFERENCES batch_po(id)
+) ENGINE=InnoDB;
+
+CREATE TABLE pesanan (
+    id               INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    kode             VARCHAR(20)  NOT NULL UNIQUE,
+    user_id          INT UNSIGNED NOT NULL,
+    batch_id         INT UNSIGNED NOT NULL,
+    total            INT UNSIGNED NOT NULL,
+    status           ENUM('menunggu_pembayaran','menunggu_verifikasi','lunas','ditolak','siap_diambil','selesai','dibatalkan')
+                     NOT NULL DEFAULT 'menunggu_pembayaran',
+    catatan          VARCHAR(255) NULL,      -- dari pembeli
+    bukti_bayar      VARCHAR(255) NULL,      -- nama file di folder privat
+    alasan_tolak     VARCHAR(255) NULL,      -- dari admin
+    created_at       DATETIME     NOT NULL,
+    dibayar_at       DATETIME     NULL,
+    diverifikasi_at  DATETIME     NULL,
+    CONSTRAINT fk_pesanan_user  FOREIGN KEY (user_id)  REFERENCES users(id),
+    CONSTRAINT fk_pesanan_batch FOREIGN KEY (batch_id) REFERENCES batch_po(id)
+) ENGINE=InnoDB;
+
+CREATE TABLE pesanan_item (
+    id          INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    pesanan_id  INT UNSIGNED NOT NULL,
+    produk_id   INT UNSIGNED NOT NULL,
+    ukuran      ENUM('S','M','L','XL','XXL') NULL,
+    qty         SMALLINT UNSIGNED NOT NULL,
+    harga       INT UNSIGNED NOT NULL,              -- harga saat checkout
+    subtotal    INT UNSIGNED NOT NULL,
+    CONSTRAINT fk_item_pesanan FOREIGN KEY (pesanan_id) REFERENCES pesanan(id) ON DELETE CASCADE,
+    CONSTRAINT fk_item_produk  FOREIGN KEY (produk_id)  REFERENCES produk(id),
+    CHECK (qty &gt; 0)
+) ENGINE=InnoDB;</code></pre>
+
+<h3>Alur Status Pesanan</h3>
+<pre style="background:#f4f4f4;padding:12px;border-radius:6px;overflow-x:auto;font-size:13px;">menunggu_pembayaran → (upload bukti) → menunggu_verifikasi → (verifikasi) → lunas → siap_diambil → selesai
+menunggu_pembayaran → (batal) → dibatalkan
+menunggu_verifikasi → (tolak + alasan) → ditolak → (upload ulang) → menunggu_verifikasi</pre>
+
+<h3>libraries/Keranjang_belanja.php — library keranjang buatan sendiri</h3>
+<pre style="background:#1e1e1e;color:#d4d4d4;padding:12px;border-radius:6px;overflow-x:auto;font-size:13px;"><code>&lt;?php
+defined('BASEPATH') OR exit('No direct script access allowed');
+
+/**
+ * Library keranjang belanja buatan sendiri (disimpan di session).
+ * Library Cart bawaan CI3 sudah deprecated, jadi dibuat versi sederhana:
+ *   session['keranjang'] = array('3|L' =&gt; 2, '4|' =&gt; 1)  -&gt; "produk_id|ukuran" =&gt; qty
+ */
+class Keranjang_belanja
+{
+    const KEY = 'keranjang';
+    const MAKS_QTY = 10;
+
+    /** @var CI_Controller */
+    protected $CI;
+
+    public function __construct()
+    {
+        $this-&gt;CI =&amp; get_instance();
+    }
+
+    public function raw()
+    {
+        return (array) $this-&gt;CI-&gt;session-&gt;userdata(self::KEY);
+    }
+
+    public function tambah($produk_id, $ukuran, $qty)
+    {
+        $items = $this-&gt;raw();
+        $key = (int) $produk_id.'|'.(string) $ukuran;
+        $items[$key] = min(self::MAKS_QTY, (isset($items[$key]) ? $items[$key] : 0) + max(1, (int) $qty));
+        $this-&gt;CI-&gt;session-&gt;set_userdata(self::KEY, $items);
+    }
+
+    public function ubah($key, $qty)
+    {
+        $items = $this-&gt;raw();
+        if (isset($items[$key]))
+        {
+            $qty = (int) $qty;
+            if ($qty &lt;= 0) unset($items[$key]);
+            else $items[$key] = min(self::MAKS_QTY, $qty);
+            $this-&gt;CI-&gt;session-&gt;set_userdata(self::KEY, $items);
+        }
+    }
+
+    public function hapus($key)
+    {
+        $this-&gt;ubah($key, 0);
+    }
+
+    public function kosongkan()
+    {
+        $this-&gt;CI-&gt;session-&gt;unset_userdata(self::KEY);
+    }
+
+    /** jumlah barang (untuk badge di navbar) */
+    public function jumlah()
+    {
+        return array_sum($this-&gt;raw());
+    }
+
+    /**
+     * Isi keranjang lengkap dengan data produk dari database.
+     * @return array array('items' =&gt; [...], 'total' =&gt; int, 'batch_id' =&gt; int|null)
+     */
+    public function detail()
+    {
+        $this-&gt;CI-&gt;load-&gt;model('produk_model');
+        $items = array();
+        $total = 0;
+        $batch_id = NULL;
+
+        foreach ($this-&gt;raw() as $key =&gt; $qty)
+        {
+            list($produk_id, $ukuran) = explode('|', $key);
+            $p = $this-&gt;CI-&gt;produk_model-&gt;find((int) $produk_id);
+            if ( ! $p)
+            {
+                $this-&gt;hapus($key); // produk sudah dihapus admin
+                continue;
+            }
+            $items[] = (object) array(
+                'key'      =&gt; $key,
+                'produk'   =&gt; $p,
+                'ukuran'   =&gt; $ukuran !== '' ? $ukuran : NULL,
+                'qty'      =&gt; $qty,
+                'subtotal' =&gt; $p-&gt;harga * $qty,
+            );
+            $total += $p-&gt;harga * $qty;
+            $batch_id = $batch_id ?: (int) $p-&gt;batch_id;
+        }
+        return array('items' =&gt; $items, 'total' =&gt; $total, 'batch_id' =&gt; $batch_id);
+    }
+}</code></pre>
+
+<h3>controllers/Keranjang.php — keranjang &amp; checkout</h3>
+<pre style="background:#1e1e1e;color:#d4d4d4;padding:12px;border-radius:6px;overflow-x:auto;font-size:13px;"><code>&lt;?php
+defined('BASEPATH') OR exit('No direct script access allowed');
+
+/**
+ * Keranjang &amp; checkout.
+ * Isi keranjang dikelola library Keranjang_belanja (di-autoload dengan nama objek $this-&gt;keranjang).
+ */
+class Keranjang extends MY_Controller
+{
+    public function __construct()
+    {
+        parent::__construct();
+        $this-&gt;load-&gt;model(array('produk_model', 'batch_model', 'pesanan_model'));
+    }
+
+    public function index()
+    {
+        $cart = $this-&gt;keranjang-&gt;detail();
+        $batch = $cart['batch_id'] ? $this-&gt;batch_model-&gt;find($cart['batch_id']) : NULL;
+        $this-&gt;render('keranjang/index', array(
+            'title' =&gt; 'Keranjang',
+            'cart'  =&gt; $cart,
+            'batch' =&gt; $batch,
+        ));
+    }
+
+    public function tambah()
+    {
+        $this-&gt;require_post();
+        $produk = $this-&gt;produk_model-&gt;detail((int) $this-&gt;input-&gt;post('produk_id')) OR show_404();
+        $batch  = $this-&gt;batch_model-&gt;find($produk-&gt;batch_id);
+        $ukuran = $produk-&gt;pakai_ukuran ? $this-&gt;input-&gt;post('ukuran') : NULL;
+        $qty    = (int) $this-&gt;input-&gt;post('qty');
+
+        if (Batch_model::status($batch) !== 'dibuka')
+        {
+            $this-&gt;flash('danger', 'PO untuk produk ini sedang tidak dibuka.');
+        }
+        elseif ($produk-&gt;pakai_ukuran &amp;&amp; ! in_array($ukuran, Produk_model::UKURAN, TRUE))
+        {
+            $this-&gt;flash('danger', 'Pilih ukuran terlebih dahulu.');
+        }
+        elseif ($qty &lt; 1 || $qty &gt; Keranjang_belanja::MAKS_QTY)
+        {
+            $this-&gt;flash('danger', 'Jumlah harus 1 sampai '.Keranjang_belanja::MAKS_QTY.'.');
+        }
+        else
+        {
+            $isi = $this-&gt;keranjang-&gt;detail();
+            if ($isi['batch_id'] &amp;&amp; $isi['batch_id'] !== (int) $produk-&gt;batch_id)
+            {
+                $this-&gt;flash('warning', 'Keranjang hanya boleh berisi produk dari satu batch PO. Selesaikan atau kosongkan keranjang dulu.');
+                redirect('keranjang');
+            }
+            $this-&gt;keranjang-&gt;tambah($produk-&gt;id, $ukuran, $qty);
+            $this-&gt;flash('success', '&lt;b&gt;'.html_escape($produk-&gt;nama).'&lt;/b&gt;'.($ukuran ? ' ukuran '.$ukuran : '').' x'.$qty.' masuk keranjang.');
+            redirect('keranjang');
+        }
+        redirect('produk/'.$produk-&gt;id);
+    }
+
+    public function ubah()
+    {
+        $this-&gt;require_post();
+        foreach ((array) $this-&gt;input-&gt;post('qty') as $key =&gt; $qty)
+        {
+            $this-&gt;keranjang-&gt;ubah($key, $qty);
+        }
+        $this-&gt;flash('success', 'Keranjang diperbarui.');
+        redirect('keranjang');
+    }
+
+    public function hapus()
+    {
+        $this-&gt;require_post();
+        $this-&gt;keranjang-&gt;hapus($this-&gt;input-&gt;post('key'));
+        redirect('keranjang');
+    }
+
+    public function checkout()
+    {
+        $this-&gt;require_post();
+        if ( ! $this-&gt;me)
+        {
+            // setelah login kembali ke keranjang (bukan ke URL checkout yang khusus POST)
+            $this-&gt;session-&gt;set_userdata('setelah_login', 'keranjang');
+            $this-&gt;flash('warning', 'Masuk atau daftar dulu untuk menyelesaikan pesanan. Isi keranjang Anda tetap tersimpan.');
+            redirect('login');
+        }
+        $this-&gt;require_login('pembeli');
+
+        $cart = $this-&gt;keranjang-&gt;detail();
+        if ( ! $cart['items'])
+        {
+            redirect('keranjang');
+        }
+
+        // 1) batch masih dibuka?
+        $batch = $this-&gt;batch_model-&gt;find($cart['batch_id']);
+        if (Batch_model::status($batch) !== 'dibuka')
+        {
+            $this-&gt;flash('danger', 'Maaf, '.html_escape($batch-&gt;nama).' sudah ditutup.');
+            redirect('keranjang');
+        }
+
+        // 2) kuota produk terbatas masih cukup?
+        $per_produk = array();
+        foreach ($cart['items'] as $it)
+        {
+            $per_produk[$it-&gt;produk-&gt;id] = (isset($per_produk[$it-&gt;produk-&gt;id]) ? $per_produk[$it-&gt;produk-&gt;id] : 0) + $it-&gt;qty;
+        }
+        foreach ($per_produk as $pid =&gt; $qty)
+        {
+            $p = $this-&gt;produk_model-&gt;detail($pid);
+            $sisa = Produk_model::sisa($p);
+            if ($sisa !== NULL &amp;&amp; $qty &gt; $sisa)
+            {
+                $this-&gt;flash('danger', 'Kuota &lt;b&gt;'.html_escape($p-&gt;nama).'&lt;/b&gt; tinggal '.$sisa.'. Kurangi jumlahnya.');
+                redirect('keranjang');
+            }
+        }
+
+        // 3) simpan pesanan
+        $catatan = mb_substr(trim(strip_tags((string) $this-&gt;input-&gt;post('catatan'))), 0, 255);
+        $kode = $this-&gt;pesanan_model-&gt;buat($this-&gt;me-&gt;id, $batch-&gt;id, $cart['items'], $cart['total'], $catatan);
+        if ( ! $kode)
+        {
+            $this-&gt;flash('danger', 'Pesanan gagal disimpan, coba lagi.');
+            redirect('keranjang');
+        }
+
+        $this-&gt;keranjang-&gt;kosongkan();
+        $this-&gt;flash('success', 'Pesanan &lt;b&gt;'.$kode.'&lt;/b&gt; dibuat. Silakan transfer lalu unggah bukti pembayaran.');
+        redirect('pesanan/detail/'.$kode);
+    }
+}</code></pre>
+
+<h3>controllers/Pesanan.php — upload bukti &amp; file privat</h3>
+<pre style="background:#1e1e1e;color:#d4d4d4;padding:12px;border-radius:6px;overflow-x:auto;font-size:13px;"><code>&lt;?php
+defined('BASEPATH') OR exit('No direct script access allowed');
+
+/** Pesanan milik pembeli yang login */
+class Pesanan extends MY_Controller
+{
+    const BUKTI_DIR = './storage/bukti/';
+
+    public function __construct()
+    {
+        parent::__construct();
+        $this-&gt;require_login();
+        $this-&gt;load-&gt;model('pesanan_model');
+    }
+
+    public function index()
+    {
+        $this-&gt;render('pesanan/index', array(
+            'title'   =&gt; 'Pesanan Saya',
+            'pesanan' =&gt; $this-&gt;pesanan_model-&gt;by_user($this-&gt;me-&gt;id),
+        ));
+    }
+
+    public function detail($kode = NULL)
+    {
+        $o = $this-&gt;_milik_saya($kode);
+        $this-&gt;render('pesanan/detail', array(
+            'title'   =&gt; 'Pesanan '.$o-&gt;kode,
+            'o'       =&gt; $o,
+            'items'   =&gt; $this-&gt;pesanan_model-&gt;items($o-&gt;id),
+        ));
+    }
+
+    /** Upload bukti transfer (boleh ulang bila sebelumnya ditolak) */
+    public function upload($kode = NULL)
+    {
+        $this-&gt;require_post();
+        $o = $this-&gt;_milik_saya($kode);
+
+        if ( ! in_array($o-&gt;status, array('menunggu_pembayaran', 'ditolak'), TRUE))
+        {
+            $this-&gt;flash('warning', 'Bukti pembayaran untuk pesanan ini sudah tidak bisa diubah.');
+            redirect('pesanan/detail/'.$o-&gt;kode);
+        }
+
+        $this-&gt;load-&gt;library('upload', array(
+            'upload_path'   =&gt; self::BUKTI_DIR,
+            'allowed_types' =&gt; 'jpg|jpeg|png|pdf',
+            'max_size'      =&gt; 2048,
+            'encrypt_name'  =&gt; TRUE,   // nama acak agar tidak bisa ditebak
+        ));
+
+        if ( ! $this-&gt;upload-&gt;do_upload('bukti'))
+        {
+            $this-&gt;flash('danger', 'Upload gagal: '.$this-&gt;upload-&gt;display_errors('', ''));
+            redirect('pesanan/detail/'.$o-&gt;kode);
+        }
+
+        if ($o-&gt;bukti_bayar &amp;&amp; is_file(self::BUKTI_DIR.$o-&gt;bukti_bayar))
+        {
+            unlink(self::BUKTI_DIR.$o-&gt;bukti_bayar);
+        }
+        $this-&gt;pesanan_model-&gt;update($o-&gt;id, array(
+            'bukti_bayar'  =&gt; $this-&gt;upload-&gt;data('file_name'),
+            'status'       =&gt; 'menunggu_verifikasi',
+            'dibayar_at'   =&gt; date('Y-m-d H:i:s'),
+            'alasan_tolak' =&gt; NULL,
+        ));
+        $this-&gt;flash('success', 'Bukti pembayaran terkirim. Admin akan memverifikasi dalam 1x24 jam.');
+        redirect('pesanan/detail/'.$o-&gt;kode);
+    }
+
+    public function batal($kode = NULL)
+    {
+        $this-&gt;require_post();
+        $o = $this-&gt;_milik_saya($kode);
+        if ($o-&gt;status === 'menunggu_pembayaran')
+        {
+            $this-&gt;pesanan_model-&gt;update($o-&gt;id, array('status' =&gt; 'dibatalkan'));
+            $this-&gt;flash('success', 'Pesanan '.$o-&gt;kode.' dibatalkan.');
+        }
+        redirect('pesanan/detail/'.$o-&gt;kode);
+    }
+
+    /** Tampilkan file bukti (folder storage/ tidak bisa diakses langsung) */
+    public function bukti($kode = NULL)
+    {
+        $o = $this-&gt;_milik_saya($kode);
+        kirim_bukti(self::BUKTI_DIR, $o-&gt;bukti_bayar);
+    }
+
+    /** Pembeli hanya boleh membuka pesanannya sendiri */
+    private function _milik_saya($kode)
+    {
+        $o = $this-&gt;pesanan_model-&gt;by_kode((string) $kode);
+        if ( ! $o || (int) $o-&gt;user_id !== (int) $this-&gt;me-&gt;id)
+        {
+            show_404();
+        }
+        return $o;
+    }
+}</code></pre>
+
+<h3>models/Pesanan_model.php — status, transaksi, rekap produksi</h3>
+<pre style="background:#1e1e1e;color:#d4d4d4;padding:12px;border-radius:6px;overflow-x:auto;font-size:13px;"><code>&lt;?php
+defined('BASEPATH') OR exit('No direct script access allowed');
+
+class Pesanan_model extends MY_Model
+{
+    protected $table = 'pesanan';
+    protected $order = 'created_at DESC';
+
+    /** status =&gt; array(label, warna badge, ikon) */
+    const STATUS = array(
+        'menunggu_pembayaran' =&gt; array('Menunggu pembayaran', 'warning',   'fa-wallet'),
+        'menunggu_verifikasi' =&gt; array('Menunggu verifikasi', 'info',      'fa-hourglass-half'),
+        'lunas'               =&gt; array('Lunas · diproduksi',  'primary',   'fa-check'),
+        'ditolak'             =&gt; array('Pembayaran ditolak',  'danger',    'fa-times'),
+        'siap_diambil'        =&gt; array('Siap diambil',        'success',   'fa-box-open'),
+        'selesai'             =&gt; array('Selesai',             'secondary', 'fa-flag-checkered'),
+        'dibatalkan'          =&gt; array('Dibatalkan',          'dark',      'fa-ban'),
+    );
+
+    /** aksi admin =&gt; array(status asal, status tujuan) */
+    const TRANSISI = array(
+        'verifikasi' =&gt; array('menunggu_verifikasi', 'lunas'),
+        'tolak'      =&gt; array('menunggu_verifikasi', 'ditolak'),
+        'siap'       =&gt; array('lunas', 'siap_diambil'),
+        'selesai'    =&gt; array('siap_diambil', 'selesai'),
+    );
+
+    /** status yang dihitung sebagai pembayaran sah */
+    const SAH = array('lunas', 'siap_diambil', 'selesai');
+
+    /**
+     * Buat pesanan dari isi keranjang dalam satu transaksi.
+     * @return string kode pesanan
+     */
+    public function buat($user_id, $batch_id, array $items, $total, $catatan)
+    {
+        $this-&gt;db-&gt;trans_start();
+        $now = date('Y-m-d H:i:s');
+        $id = $this-&gt;insert(array(
+            'kode'       =&gt; uniqid('tmp'),   // diganti setelah id diketahui
+            'user_id'    =&gt; $user_id,
+            'batch_id'   =&gt; $batch_id,
+            'total'      =&gt; $total,
+            'status'     =&gt; 'menunggu_pembayaran',
+            'catatan'    =&gt; $catatan ?: NULL,
+            'created_at' =&gt; $now,
+        ));
+        $kode = 'MH'.date('ymd').'-'.str_pad($id, 4, '0', STR_PAD_LEFT);
+        $this-&gt;update($id, array('kode' =&gt; $kode));
+
+        foreach ($items as $it)
+        {
+            $this-&gt;db-&gt;insert('pesanan_item', array(
+                'pesanan_id' =&gt; $id,
+                'produk_id'  =&gt; $it-&gt;produk-&gt;id,
+                'ukuran'     =&gt; $it-&gt;ukuran,
+                'qty'        =&gt; $it-&gt;qty,
+                'harga'      =&gt; $it-&gt;produk-&gt;harga,
+                'subtotal'   =&gt; $it-&gt;subtotal,
+            ));
+        }
+        $this-&gt;db-&gt;trans_complete();
+        return $this-&gt;db-&gt;trans_status() ? $kode : FALSE;
+    }
+
+    public function by_kode($kode)
+    {
+        return $this-&gt;db-&gt;select('o.*, u.nama AS pembeli, u.email, u.no_wa, b.nama AS batch, b.rekening, b.estimasi_ambil, b.ditutup_at')
+            -&gt;from('pesanan o')
+            -&gt;join('users u', 'u.id = o.user_id')
+            -&gt;join('batch_po b', 'b.id = o.batch_id')
+            -&gt;where('o.kode', $kode)-&gt;get()-&gt;row();
+    }
+
+    public function items($pesanan_id)
+    {
+        return $this-&gt;db-&gt;select('i.*, p.nama, p.gambar')
+            -&gt;from('pesanan_item i')-&gt;join('produk p', 'p.id = i.produk_id')
+            -&gt;where('i.pesanan_id', $pesanan_id)-&gt;order_by('i.id')-&gt;get()-&gt;result();
+    }
+
+    public function by_user($user_id)
+    {
+        return $this-&gt;db-&gt;select('o.*, b.nama AS batch, (SELECT SUM(qty) FROM pesanan_item WHERE pesanan_id = o.id) AS jumlah_barang', FALSE)
+            -&gt;from('pesanan o')-&gt;join('batch_po b', 'b.id = o.batch_id')
+            -&gt;where('o.user_id', $user_id)-&gt;order_by('o.created_at', 'DESC')-&gt;get()-&gt;result();
+    }
+
+    public function daftar_admin($status = NULL, $batch_id = NULL)
+    {
+        if ($status &amp;&amp; isset(self::STATUS[$status])) $this-&gt;db-&gt;where('o.status', $status);
+        if ($batch_id) $this-&gt;db-&gt;where('o.batch_id', (int) $batch_id);
+        return $this-&gt;db-&gt;select('o.*, u.nama AS pembeli, u.no_wa, b.nama AS batch, (SELECT SUM(qty) FROM pesanan_item WHERE pesanan_id = o.id) AS jumlah_barang', FALSE)
+            -&gt;from('pesanan o')-&gt;join('users u', 'u.id = o.user_id')-&gt;join('batch_po b', 'b.id = o.batch_id')
+            -&gt;order_by("FIELD(o.status, 'menunggu_verifikasi') DESC, o.created_at DESC", '', FALSE)
+            -&gt;get()-&gt;result();
+    }
+
+    public function hitung_per_status()
+    {
+        $hasil = array_fill_keys(array_keys(self::STATUS), 0);
+        foreach ($this-&gt;db-&gt;select('status, COUNT(*) AS n')-&gt;group_by('status')-&gt;get($this-&gt;table)-&gt;result() as $r)
+        {
+            $hasil[$r-&gt;status] = (int) $r-&gt;n;
+        }
+        return $hasil;
+    }
+
+    public function pendapatan_sah($batch_id = NULL)
+    {
+        if ($batch_id) $this-&gt;db-&gt;where('batch_id', $batch_id);
+        $r = $this-&gt;db-&gt;select_sum('total')-&gt;where_in('status', self::SAH)-&gt;get($this-&gt;table)-&gt;row();
+        return (int) $r-&gt;total;
+    }
+
+    /** Jumlah terjual (pesanan sah) per produk dalam satu batch, untuk grafik */
+    public function terjual_per_produk($batch_id)
+    {
+        // item dari pesanan yang belum sah tetap ikut ter-join (LEFT JOIN), jadi hanya
+        // dijumlahkan bila pesanannya cocok (o.id tidak NULL)
+        return $this-&gt;db-&gt;select('p.nama, COALESCE(SUM(IF(o.id IS NULL, 0, i.qty)), 0) AS qty', FALSE)
+            -&gt;from('produk p')
+            -&gt;join('pesanan_item i', 'i.produk_id = p.id', 'left')
+            -&gt;join('pesanan o', "o.id = i.pesanan_id AND o.status IN ('lunas','siap_diambil','selesai')", 'left')
+            -&gt;where('p.batch_id', $batch_id)
+            -&gt;group_by('p.id')-&gt;order_by('p.id')-&gt;get()-&gt;result();
+    }
+
+    /**
+     * Rekap produksi: jumlah per produk per ukuran dari pesanan sah.
+     * @return array produk_id =&gt; (object) nama, pakai_ukuran, per_ukuran[S..XXL], total
+     */
+    public function rekap_produksi($batch_id)
+    {
+        $rows = $this-&gt;db-&gt;select('p.id, p.nama, p.pakai_ukuran, i.ukuran, SUM(i.qty) AS qty')
+            -&gt;from('pesanan_item i')
+            -&gt;join('pesanan o', 'o.id = i.pesanan_id')
+            -&gt;join('produk p', 'p.id = i.produk_id')
+            -&gt;where('o.batch_id', $batch_id)
+            -&gt;where_in('o.status', self::SAH)
+            -&gt;group_by(array('p.id', 'i.ukuran'))
+            -&gt;order_by('p.id')-&gt;get()-&gt;result();
+
+        $rekap = array();
+        foreach ($rows as $r)
+        {
+            if ( ! isset($rekap[$r-&gt;id]))
+            {
+                $rekap[$r-&gt;id] = (object) array('nama' =&gt; $r-&gt;nama, 'pakai_ukuran' =&gt; (bool) $r-&gt;pakai_ukuran,
+                    'per_ukuran' =&gt; array_fill_keys(Produk_model::UKURAN, 0), 'total' =&gt; 0);
+            }
+            if ($r-&gt;ukuran) $rekap[$r-&gt;id]-&gt;per_ukuran[$r-&gt;ukuran] = (int) $r-&gt;qty;
+            $rekap[$r-&gt;id]-&gt;total += (int) $r-&gt;qty;
+        }
+        return $rekap;
+    }
+
+    /** Daftar pengambilan: siapa mengambil apa (pesanan sah) */
+    public function daftar_ambil($batch_id)
+    {
+        return $this-&gt;db-&gt;select("o.kode, o.status, u.nama, u.no_wa,
+                GROUP_CONCAT(CONCAT(p.nama, IF(i.ukuran IS NULL, '', CONCAT(' (', i.ukuran, ')')), ' x', i.qty) ORDER BY i.id SEPARATOR '; ') AS barang", FALSE)
+            -&gt;from('pesanan o')-&gt;join('users u', 'u.id = o.user_id')
+            -&gt;join('pesanan_item i', 'i.pesanan_id = o.id')-&gt;join('produk p', 'p.id = i.produk_id')
+            -&gt;where('o.batch_id', $batch_id)-&gt;where_in('o.status', self::SAH)
+            -&gt;group_by('o.id')-&gt;order_by('u.nama')-&gt;get()-&gt;result();
+    }
+}</code></pre>
+
+<h3>controllers/admin/Pesanan.php — verifikasi pembayaran</h3>
+<pre style="background:#1e1e1e;color:#d4d4d4;padding:12px;border-radius:6px;overflow-x:auto;font-size:13px;"><code>&lt;?php
+defined('BASEPATH') OR exit('No direct script access allowed');
+
+/** Kelola pesanan: verifikasi pembayaran dan update status pengambilan */
+class Pesanan extends Admin_Controller
+{
+    public function __construct()
+    {
+        parent::__construct();
+        $this-&gt;load-&gt;model(array('pesanan_model', 'batch_model'));
+    }
+
+    public function index()
+    {
+        $status = $this-&gt;input-&gt;get('status', TRUE);
+        $batch  = $this-&gt;input-&gt;get('batch', TRUE);
+        $this-&gt;render('admin/pesanan/index', array(
+            'title'      =&gt; 'Pesanan',
+            'pesanan'    =&gt; $this-&gt;pesanan_model-&gt;daftar_admin($status, $batch),
+            'per_status' =&gt; $this-&gt;pesanan_model-&gt;hitung_per_status(),
+            'opsi_batch' =&gt; $this-&gt;batch_model-&gt;dropdown('nama'),
+            'f_status'   =&gt; $status,
+            'f_batch'    =&gt; $batch,
+        ));
+    }
+
+    public function detail($kode = NULL)
+    {
+        $o = $this-&gt;pesanan_model-&gt;by_kode((string) $kode) OR show_404();
+        $this-&gt;render('admin/pesanan/detail', array(
+            'title' =&gt; 'Pesanan '.$o-&gt;kode,
+            'o'     =&gt; $o,
+            'items' =&gt; $this-&gt;pesanan_model-&gt;items($o-&gt;id),
+        ));
+    }
+
+    /** POST aksi=verifikasi|tolak|siap|selesai */
+    public function ubah_status($kode = NULL)
+    {
+        $this-&gt;require_post();
+        $o = $this-&gt;pesanan_model-&gt;by_kode((string) $kode) OR show_404();
+        $aksi = $this-&gt;input-&gt;post('aksi');
+
+        if ( ! isset(Pesanan_model::TRANSISI[$aksi]) || Pesanan_model::TRANSISI[$aksi][0] !== $o-&gt;status)
+        {
+            $this-&gt;flash('danger', 'Aksi tidak valid untuk status pesanan saat ini.');
+            redirect('admin/pesanan/detail/'.$o-&gt;kode);
+        }
+
+        $data = array('status' =&gt; Pesanan_model::TRANSISI[$aksi][1]);
+        if ($aksi === 'verifikasi')
+        {
+            $data['diverifikasi_at'] = date('Y-m-d H:i:s');
+        }
+        if ($aksi === 'tolak')
+        {
+            $alasan = trim(strip_tags((string) $this-&gt;input-&gt;post('alasan_tolak')));
+            if ($alasan === '')
+            {
+                $this-&gt;flash('danger', 'Isi alasan penolakan agar pembeli tahu apa yang harus diperbaiki.');
+                redirect('admin/pesanan/detail/'.$o-&gt;kode);
+            }
+            $data['alasan_tolak'] = mb_substr($alasan, 0, 255);
+        }
+
+        $this-&gt;pesanan_model-&gt;update($o-&gt;id, $data);
+        $this-&gt;flash('success', 'Status pesanan &lt;b&gt;'.$o-&gt;kode.'&lt;/b&gt; menjadi &lt;b&gt;'.Pesanan_model::STATUS[$data['status']][0].'&lt;/b&gt;.');
+        redirect('admin/pesanan/detail/'.$o-&gt;kode);
+    }
+
+    public function bukti($kode = NULL)
+    {
+        $o = $this-&gt;pesanan_model-&gt;by_kode((string) $kode) OR show_404();
+        kirim_bukti('./storage/bukti/', $o-&gt;bukti_bayar);
+    }
+}</code></pre>
+
+<h3>Hasil Latihan 2b</h3>
+<p><i>[Sisipkan gambar: l2m-01 sampai l2m-22 — katalog, detail produk, keranjang, checkout harus login, validasi daftar, pesanan dibuat, upload ditolak, menunggu verifikasi, pesanan saya, dashboard admin, pesanan perlu cek, cek bukti, diverifikasi, ditolak, rekap produksi, batch, tambah produk, daftar produk, siap diambil, alasan penolakan, PO ditutup, phpMyAdmin]</i></p>
+
+<h3>Penjelasan</h3>
+<ul>
+<li><b>Library Keranjang_belanja</b> menyimpan <code>"produk_id|ukuran" =&gt; qty</code> di session (library Cart bawaan CI3 sudah <i>deprecated</i>). Di-autoload dengan alias <code>'keranjang_belanja' =&gt; 'keranjang'</code>; nama class dibedakan dari controller <code>Keranjang</code> agar tidak bentrok.</li>
+<li><b>Checkout berlapis</b>: batch masih dibuka → kuota cukup → pesanan dan item disimpan dalam satu transaksi database. Kode pesanan <code>MHyymmdd-0001</code> dibuat setelah <code>insert_id</code> diketahui.</li>
+<li><b>Bukti transfer privat</b>: disimpan di <code>storage/bukti/</code> dengan nama acak, folder diblokir <code>.htaccess</code> (akses langsung → 403), dan file hanya dikirim lewat controller setelah memastikan peminta adalah pemilik pesanan atau admin.</li>
+<li><b>Transisi status</b> disimpan di konstanta <code>TRANSISI</code>, sehingga admin tidak bisa melompati tahap (misalnya menandai siap diambil sebelum lunas).</li>
+<li><b>Rekap produksi</b>: <code>GROUP BY produk, ukuran</code> dari pesanan sah, diubah menjadi tabel pivot S–XXL, dan bisa diunduh sebagai CSV (<code>fputcsv</code> + helper <code>download</code>).</li>
+</ul>
+
+<!-- ===================================================== -->
+<h2>Kesimpulan</h2>
+<p>Latihan 1 membahas fondasi CodeIgniter 3, mulai dari konfigurasi, routing, view, template admin, CRUD dengan validasi, upload file, hingga login dan pembatasan role. Latihan 2 menerapkan fondasi tersebut pada dua kasus yang lebih kompleks. <b>SIAKAD Presensi</b> menunjukkan pengelolaan banyak role, otorisasi data, logika waktu (kode presensi yang kedaluwarsa), dan rekap memakai SQL VIEW. <b>MerchHima</b> menunjukkan alur e-commerce preorder: keranjang berbasis session, checkout dalam transaksi, kuota, verifikasi pembayaran dengan file privat, alur status pesanan, dan laporan produksi yang bisa diekspor. Fitur seperti <code>MY_Controller</code>/<code>MY_Model</code>, <i>layout rendering</i>, serta library dan helper custom membuat kode lebih ringkas dan mudah dikembangkan.</p>
+
+</div>

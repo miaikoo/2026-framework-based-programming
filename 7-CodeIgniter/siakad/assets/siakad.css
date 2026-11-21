@@ -1,0 +1,23 @@
+/* Tambahan kecil di atas AdminLTE 3 */
+.avatar {
+	display: inline-flex; align-items: center; justify-content: center;
+	width: 34px; height: 34px; border-radius: 50%;
+	background: #3c8dbc; color: #fff; font-weight: 700;
+}
+.kode-presensi {
+	font-family: Consolas, "Courier New", monospace;
+	font-size: 3.4rem; font-weight: 700; letter-spacing: .5rem;
+	background: #f4f6f9; border: 2px dashed #007bff; border-radius: .5rem;
+	padding: .4rem 1rem; display: inline-block; color: #0056b3;
+}
+.input-kode {
+	font-family: Consolas, "Courier New", monospace;
+	font-size: 2rem; letter-spacing: .6rem; text-align: center; text-transform: uppercase;
+}
+.matriks th, .matriks td { text-align: center; vertical-align: middle !important; padding: .35rem !important; }
+.matriks td.nama, .matriks th.nama { text-align: left; white-space: nowrap; }
+.jadwal-hari { min-height: 160px; }
+.jadwal-hari.hari-ini { box-shadow: 0 0 0 2px rgba(0, 123, 255, .35); }
+.jadwal-item { border: 1px solid #d6e9f0; background: #f1f8fb; border-radius: .25rem; padding: .5rem .75rem; margin-bottom: .5rem; }
+.pengumuman-item + .pengumuman-item { border-top: 1px solid #dee2e6; }
+.login-page { background: linear-gradient(135deg, #1e3a8a, #0e7490); }

@@ -1,0 +1,29 @@
+/* Tambahan di atas AdminLTE 3 untuk MerchHima */
+.navbar-merch { background: #1e1b4b; }
+.brand-badge {
+	display: inline-flex; align-items: center; justify-content: center;
+	width: 32px; height: 32px; border-radius: 8px; background: #f59e0b; color: #1e1b4b;
+}
+.hero-batch {
+	background: linear-gradient(120deg, #312e81, #7c3aed); color: #fff;
+	border-radius: .75rem; padding: 1.75rem 2rem;
+}
+.hero-batch .countdown { font-size: 1.35rem; font-weight: 700; color: #fde68a; }
+.produk-card img { aspect-ratio: 1 / 1; object-fit: cover; }
+.produk-card .harga { color: #6d28d9; font-weight: 700; font-size: 1.1rem; }
+.ukuran-pilih .btn { min-width: 56px; }
+.ukuran-pilih .btn.active { background: #6d28d9; border-color: #6d28d9; color: #fff; }
+.thumb { width: 54px; height: 54px; object-fit: cover; border-radius: .4rem; }
+.timeline-status { display: flex; justify-content: space-between; position: relative; margin: 1rem 0 .5rem; }
+.timeline-status::before { content: ""; position: absolute; top: 15px; left: 6%; right: 6%; height: 3px; background: #dee2e6; }
+.timeline-status .step { text-align: center; position: relative; flex: 1; font-size: .8rem; color: #6c757d; }
+.timeline-status .dot {
+	width: 32px; height: 32px; border-radius: 50%; margin: 0 auto .3rem;
+	display: flex; align-items: center; justify-content: center; background: #dee2e6; color: #fff;
+}
+.timeline-status .step.done .dot { background: #16a34a; }
+.timeline-status .step.now .dot { background: #f59e0b; box-shadow: 0 0 0 4px #fde68a; }
+.timeline-status .step.done, .timeline-status .step.now { color: #212529; font-weight: 600; }
+.rekap th, .rekap td { text-align: center; }
+.rekap td:first-child, .rekap th:first-child { text-align: left; }
+.bukti-preview { max-height: 360px; border: 1px solid #dee2e6; border-radius: .5rem; }

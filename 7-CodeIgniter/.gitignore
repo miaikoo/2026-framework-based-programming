@@ -1,0 +1,13 @@
+bin/
+obj/
+
+# CodeIgniter: log & cache runtime
+*/application/logs/*.php
+*/application/cache/*
+!*/application/cache/index.html
+!*/application/cache/.htaccess
+
+# Bukti transfer yang diunggah pembeli (privat). Hanya contoh bawaan yang ikut repo.
+merch-po/storage/bukti/*
+!merch-po/storage/bukti/index.html
+!merch-po/storage/bukti/contoh-bukti-*.png
