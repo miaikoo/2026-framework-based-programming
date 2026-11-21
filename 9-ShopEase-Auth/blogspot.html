@@ -1,0 +1,1051 @@
+<!-- Tempel seluruh isi file ini di Blogger: New Post → ikon pensil → HTML view -->
+<div style="font-family:Segoe UI,Arial,sans-serif;line-height:1.7;color:#222;">
+
+<h1>Tugas 9 PBKK — ShopEase Authentication System dengan CodeIgniter 3</h1>
+
+<p>📂 Source code lengkap: <a href="https://github.com/miaikoo/2026-framework-based-programming/tree/main/9-ShopEase-Auth" target="_blank">github.com/miaikoo/2026-framework-based-programming</a></p>
+
+<p>Pada tugas ini saya menambahkan <b>sistem akun</b> ke toko online <b>ShopEase</b> dari tugas sebelumnya: registrasi, login, logout, dan pembatasan halaman berdasarkan peran <b>customer</b>, <b>operator</b>, dan <b>admin</b>. Aplikasi dibuat dengan <b>CodeIgniter 3.1.13</b> dan <b>MySQL</b> di XAMPP. Data pengguna disimpan lewat <b>Model</b>, password di-hash, identitas dijaga dengan <b>Session</b>, dan sebuah <b>hook</b> memeriksa peran sebelum <b>Controller</b> menampilkan <b>View</b>.</p>
+
+<p><i>[Sisipkan gambar: s9-01-login.png]</i></p>
+
+<h2>Fitur</h2>
+<ul>
+<li><b>Inti</b>: registrasi dengan validasi per kolom, login, logout (POST + CSRF), password di-hash, ID sesi diganti setelah login.</li>
+<li><b>Hak akses</b>: peta akses di <code>config/akses.php</code> + hook <code>Penjaga_akses</code> sebagai pengganti Filter CI4. Tamu dialihkan ke login, peran yang tidak berhak mendapat halaman 403.</li>
+<li><b>Peran</b>: customer → <code>/akun</code>; operator → <code>/operator</code> (stok menipis &amp; data pelanggan); admin → <code>/admin</code> dan <code>/admin/pengguna</code> (ubah peran, hapus akun).</li>
+<li><b>Ingat saya</b>: token selector + validator di tabel <code>remember_tokens</code>, hanya hash yang disimpan, token dirotasi setiap dipakai dan dicabut saat password diganti.</li>
+<li><b>Batas percobaan</b>: 5 kali gagal dalam 15 menit (email + IP sama) mengunci login 5 menit; dicatat di tabel <code>login_attempts</code> yang juga menjadi log aktivitas admin.</li>
+<li><b>Lainnya</b>: kembali ke halaman tujuan setelah login, ganti password, lupakan semua perangkat, perubahan peran berlaku tanpa login ulang, tampilan HP.</li>
+</ul>
+
+<h2>Cara Menjalankan</h2>
+<ol>
+<li>Start Apache dan MySQL di XAMPP.</li>
+<li>Import <code>database/db_shopease.sql</code> lewat phpMyAdmin.</li>
+<li>Buka <code>http://localhost/pbkk9/shopease/</code>. Akun contoh: <code>admin@shopease.test</code>, <code>operator@shopease.test</code>, <code>raka@shopease.test</code>, password <code>shopease123</code>.</li>
+</ol>
+
+<h2>Langkah 1. Database db_shopease</h2>
+<pre style="background:#1e1e1e;color:#d4d4d4;padding:12px;border-radius:6px;overflow-x:auto;font-size:13px;"><code>-- =========================================================
+-- Tugas 9 - ShopEase Authentication System (CodeIgniter 3)
+-- Database: db_shopease
+-- Import lewat phpMyAdmin (tab Import) atau:  mysql -u root &lt; db_shopease.sql
+-- Password semua akun contoh: shopease123
+-- =========================================================
+DROP DATABASE IF EXISTS db_shopease;
+CREATE DATABASE db_shopease CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+USE db_shopease;
+
+-- Pengguna. Peran: customer (pembeli), operator (staf toko), admin (pemilik/pengelola).
+CREATE TABLE users (
+    id_user        INT AUTO_INCREMENT PRIMARY KEY,
+    name           VARCHAR(100) NOT NULL,
+    email          VARCHAR(100) NOT NULL UNIQUE,
+    password       VARCHAR(255) NOT NULL,                 -- hasil password_hash()
+    role           ENUM('customer','admin','operator') NOT NULL DEFAULT 'customer',
+    phone          VARCHAR(20),
+    address        TEXT,
+    last_login_at  DATETIME NULL,
+    created_at     DATETIME NULL,
+    updated_at     DATETIME NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Setiap percobaan login dicatat: dipakai untuk membatasi percobaan gagal
+-- dan ditampilkan sebagai log aktivitas di dashboard admin.
+CREATE TABLE login_attempts (
+    id          INT AUTO_INCREMENT PRIMARY KEY,
+    email       VARCHAR(100) NOT NULL,
+    ip_address  VARCHAR(45)  NOT NULL,
+    berhasil    TINYINT(1)   NOT NULL,
+    user_agent  VARCHAR(255) NULL,
+    created_at  DATETIME     NOT NULL,
+    INDEX idx_email_ip_waktu (email, ip_address, created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Token "Ingat saya" (pola selector + validator).
+-- Cookie berisi selector:validator; yang disimpan di database hanya hash validator.
+CREATE TABLE remember_tokens (
+    id              INT AUTO_INCREMENT PRIMARY KEY,
+    id_user         INT          NOT NULL,
+    selector        CHAR(24)     NOT NULL UNIQUE,
+    validator_hash  CHAR(64)     NOT NULL,
+    expires_at      DATETIME     NOT NULL,
+    created_at      DATETIME     NOT NULL,
+    CONSTRAINT fk_token_user FOREIGN KEY (id_user) REFERENCES users(id_user) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;</code></pre>
+
+<h2>Langkah 2. Konfigurasi</h2>
+<ul>
+<li><code>config/database.php</code>: database <code>db_shopease</code>, user <code>root</code>, charset <code>utf8mb4</code>.</li>
+<li><code>config/autoload.php</code>: <code>database</code>, <code>session</code>, <code>form_validation</code>, dan library <code>'autentikasi' =&gt; 'auth'</code>. Nama class library dibedakan dari controller <code>Auth</code> agar tidak bentrok.</li>
+<li><code>config/config.php</code>: <code>enable_hooks = TRUE</code>, <code>csrf_protection = TRUE</code>, <code>cookie_httponly = TRUE</code>.</li>
+</ul>
+<h3>config/akses.php — peta hak akses</h3>
+<pre style="background:#1e1e1e;color:#d4d4d4;padding:12px;border-radius:6px;overflow-x:auto;font-size:13px;"><code>&lt;?php
+defined('BASEPATH') OR exit('No direct script access allowed');
+
+/*
+| -------------------------------------------------------------------
+| Peta hak akses ShopEase
+| -------------------------------------------------------------------
+| CodeIgniter 3 tidak punya "Filter" seperti CI4. Sebagai gantinya, hook
+| Penjaga_akses (application/hooks/Penjaga_akses.php) membaca peta ini
+| SEBELUM method controller dijalankan.
+|
+| Kunci  = awalan URI (segmen pertama setelah base URL).
+| Nilai  = 'login'                      -&gt; semua peran yang sudah login
+|          array('admin', 'operator')   -&gt; hanya peran tersebut
+|
+| URI yang tidak tercantum bersifat publik (landing page, katalog, keranjang).
+*/
+$config['akses'] = array(
+    'akun'     =&gt; 'login',
+    'operator' =&gt; array('operator', 'admin'),   // admin juga boleh membuka halaman operator
+    'admin'    =&gt; array('admin'),
+);
+
+/*
+| Halaman khusus tamu. Pengguna yang sudah login diarahkan ke beranda perannya.
+*/
+$config['khusus_tamu'] = array('login', 'register');
+
+/*
+| Halaman awal setiap peran setelah login.
+*/
+$config['beranda_peran'] = array(
+    'admin'    =&gt; 'admin',
+    'operator' =&gt; 'operator',
+    'customer' =&gt; 'akun',
+);
+
+/*
+| Pembatasan percobaan login: BATAS kali gagal dalam JENDELA menit untuk
+| email + IP yang sama akan mengunci login selama KUNCI menit.
+*/
+$config['login_batas_gagal']   = 5;
+$config['login_jendela_menit'] = 15;
+$config['login_kunci_menit']   = 5;
+
+/*
+| Umur cookie "Ingat saya" (hari).
+*/
+$config['ingat_saya_hari'] = 30;</code></pre>
+
+<h2>Langkah 3. Model</h2>
+<h3>models/User_model.php</h3>
+<pre style="background:#1e1e1e;color:#d4d4d4;padding:12px;border-radius:6px;overflow-x:auto;font-size:13px;"><code>&lt;?php
+defined('BASEPATH') OR exit('No direct script access allowed');
+
+class User_model extends CI_Model
+{
+    private $table = 'users';
+
+    /** Kolom yang aman ditampilkan (tanpa password) */
+    const KOLOM_PUBLIK = 'id_user, name, email, role, phone, address, last_login_at, created_at, updated_at';
+
+    const PERAN = array('customer', 'operator', 'admin');
+
+    public function cari($id)
+    {
+        return $this-&gt;db-&gt;get_where($this-&gt;table, array('id_user' =&gt; (int) $id))-&gt;row();
+    }
+
+    public function cari_by_email($email)
+    {
+        return $this-&gt;db-&gt;get_where($this-&gt;table, array('email' =&gt; strtolower(trim($email))))-&gt;row();
+    }
+
+    /** Akun baru dari form registrasi. Peran selalu customer. */
+    public function daftar(array $data)
+    {
+        $now = date('Y-m-d H:i:s');
+        $this-&gt;db-&gt;insert($this-&gt;table, array(
+            'name'       =&gt; $data['name'],
+            'email'      =&gt; strtolower($data['email']),
+            'password'   =&gt; password_hash($data['password'], PASSWORD_DEFAULT),
+            'role'       =&gt; 'customer',
+            'phone'      =&gt; $data['phone'] !== '' ? $data['phone'] : NULL,
+            'address'    =&gt; $data['address'] !== '' ? $data['address'] : NULL,
+            'created_at' =&gt; $now,
+            'updated_at' =&gt; $now,
+        ));
+        return $this-&gt;db-&gt;insert_id();
+    }
+
+    public function ubah_profil($id, array $data)
+    {
+        $data['updated_at'] = date('Y-m-d H:i:s');
+        return $this-&gt;db-&gt;update($this-&gt;table, $data, array('id_user' =&gt; (int) $id));
+    }
+
+    public function ganti_password($id, $password_baru)
+    {
+        return $this-&gt;ubah_profil($id, array('password' =&gt; password_hash($password_baru, PASSWORD_DEFAULT)));
+    }
+
+    public function catat_login($id)
+    {
+        $this-&gt;db-&gt;update($this-&gt;table, array('last_login_at' =&gt; date('Y-m-d H:i:s')), array('id_user' =&gt; (int) $id));
+    }
+
+    /** Daftar pengguna untuk admin/operator, bisa difilter peran &amp; kata kunci */
+    public function daftar_pengguna($peran = NULL, $q = NULL, $limit = NULL)
+    {
+        $this-&gt;db-&gt;select(self::KOLOM_PUBLIK)-&gt;from($this-&gt;table);
+        if (in_array($peran, self::PERAN, TRUE)) $this-&gt;db-&gt;where('role', $peran);
+        if ($q)
+        {
+            $this-&gt;db-&gt;group_start()-&gt;like('name', $q)-&gt;or_like('email', $q)-&gt;or_like('phone', $q)-&gt;group_end();
+        }
+        if ($limit) $this-&gt;db-&gt;limit($limit);
+        return $this-&gt;db-&gt;order_by('created_at', 'DESC')-&gt;get()-&gt;result();
+    }
+
+    public function hitung_per_peran()
+    {
+        $hasil = array_fill_keys(self::PERAN, 0);
+        foreach ($this-&gt;db-&gt;select('role, COUNT(*) AS n')-&gt;group_by('role')-&gt;get($this-&gt;table)-&gt;result() as $r)
+        {
+            $hasil[$r-&gt;role] = (int) $r-&gt;n;
+        }
+        return $hasil;
+    }
+
+    public function daftar_sejak($datetime)
+    {
+        return $this-&gt;db-&gt;where('created_at &gt;=', $datetime)-&gt;count_all_results($this-&gt;table);
+    }
+
+    public function ubah_peran($id, $peran)
+    {
+        return $this-&gt;ubah_profil($id, array('role' =&gt; $peran));
+    }
+
+    public function hapus($id)
+    {
+        return $this-&gt;db-&gt;delete($this-&gt;table, array('id_user' =&gt; (int) $id));
+    }
+
+    public function email_dipakai_lain($email, $kecuali_id)
+    {
+        return $this-&gt;db-&gt;where('email', strtolower($email))-&gt;where('id_user !=', (int) $kecuali_id)
+            -&gt;count_all_results($this-&gt;table) &gt; 0;
+    }
+}</code></pre>
+<h3>models/Login_attempt_model.php</h3>
+<pre style="background:#1e1e1e;color:#d4d4d4;padding:12px;border-radius:6px;overflow-x:auto;font-size:13px;"><code>&lt;?php
+defined('BASEPATH') OR exit('No direct script access allowed');
+
+/**
+ * Catatan percobaan login.
+ * Dipakai untuk (1) membatasi percobaan gagal dan (2) log aktivitas di dashboard admin.
+ */
+class Login_attempt_model extends CI_Model
+{
+    private $table = 'login_attempts';
+
+    public function catat($email, $ip, $berhasil, $user_agent)
+    {
+        $this-&gt;db-&gt;insert($this-&gt;table, array(
+            'email'      =&gt; strtolower(trim($email)),
+            'ip_address' =&gt; $ip,
+            'berhasil'   =&gt; $berhasil ? 1 : 0,
+            'user_agent' =&gt; mb_substr((string) $user_agent, 0, 255),
+            'created_at' =&gt; date('Y-m-d H:i:s'),
+        ));
+    }
+
+    /**
+     * Waktu terkunci berakhir (timestamp) bila email+IP sedang dikunci, atau NULL.
+     * Aturan: &gt;= $batas kali gagal dalam $jendela menit terakhir (setelah login berhasil
+     * yang terakhir) mengunci login selama $kunci menit sejak kegagalan terakhir.
+     */
+    public function terkunci_sampai($email, $ip, $batas, $jendela, $kunci)
+    {
+        $email = strtolower(trim($email));
+        $sejak = date('Y-m-d H:i:s', time() - $jendela * 60);
+
+        $sukses_terakhir = $this-&gt;db-&gt;select_max('created_at')
+            -&gt;where(array('email' =&gt; $email, 'ip_address' =&gt; $ip, 'berhasil' =&gt; 1))
+            -&gt;get($this-&gt;table)-&gt;row()-&gt;created_at;
+        if ($sukses_terakhir &amp;&amp; $sukses_terakhir &gt; $sejak) $sejak = $sukses_terakhir;
+
+        $gagal = $this-&gt;db-&gt;select('COUNT(*) AS n, MAX(created_at) AS terakhir', FALSE)
+            -&gt;where(array('email' =&gt; $email, 'ip_address' =&gt; $ip, 'berhasil' =&gt; 0))
+            -&gt;where('created_at &gt;', $sejak)
+            -&gt;get($this-&gt;table)-&gt;row();
+
+        if ((int) $gagal-&gt;n &lt; $batas) return NULL;
+        $buka = strtotime($gagal-&gt;terakhir) + $kunci * 60;
+        return $buka &gt; time() ? $buka : NULL;
+    }
+
+    public function sisa_percobaan($email, $ip, $batas, $jendela)
+    {
+        $n = $this-&gt;db-&gt;where(array('email' =&gt; strtolower(trim($email)), 'ip_address' =&gt; $ip, 'berhasil' =&gt; 0))
+            -&gt;where('created_at &gt;', date('Y-m-d H:i:s', time() - $jendela * 60))
+            -&gt;count_all_results($this-&gt;table);
+        return max(0, $batas - $n);
+    }
+
+    public function terbaru($limit = 8)
+    {
+        return $this-&gt;db-&gt;select('a.*, u.name, u.role')
+            -&gt;from($this-&gt;table.' a')
+            -&gt;join('users u', 'u.email = a.email', 'left')
+            -&gt;order_by('a.id', 'DESC')-&gt;limit($limit)-&gt;get()-&gt;result();
+    }
+
+    public function ringkasan_24jam()
+    {
+        $r = $this-&gt;db-&gt;select('COALESCE(SUM(berhasil = 1), 0) AS sukses, COALESCE(SUM(berhasil = 0), 0) AS gagal', FALSE)
+            -&gt;where('created_at &gt;=', date('Y-m-d H:i:s', time() - 86400))
+            -&gt;get($this-&gt;table)-&gt;row();
+        return (object) array('sukses' =&gt; (int) $r-&gt;sukses, 'gagal' =&gt; (int) $r-&gt;gagal);
+    }
+}</code></pre>
+<h3>models/Remember_token_model.php</h3>
+<pre style="background:#1e1e1e;color:#d4d4d4;padding:12px;border-radius:6px;overflow-x:auto;font-size:13px;"><code>&lt;?php
+defined('BASEPATH') OR exit('No direct script access allowed');
+
+/**
+ * Token "Ingat saya" dengan pola selector + validator.
+ *  - selector  : acak, disimpan apa adanya, dipakai untuk mencari baris token
+ *  - validator : acak, hanya hash SHA-256-nya yang disimpan
+ * Jika database bocor, isi tabel ini tidak bisa dipakai untuk membuat cookie yang sah.
+ */
+class Remember_token_model extends CI_Model
+{
+    private $table = 'remember_tokens';
+
+    /** @return string nilai cookie "selector:validator" */
+    public function buat($id_user, $hari)
+    {
+        $selector  = bin2hex(random_bytes(12));   // 24 karakter
+        $validator = bin2hex(random_bytes(32));   // 64 karakter
+        $this-&gt;db-&gt;insert($this-&gt;table, array(
+            'id_user'        =&gt; (int) $id_user,
+            'selector'       =&gt; $selector,
+            'validator_hash' =&gt; hash('sha256', $validator),
+            'expires_at'     =&gt; date('Y-m-d H:i:s', time() + $hari * 86400),
+            'created_at'     =&gt; date('Y-m-d H:i:s'),
+        ));
+        return $selector.':'.$validator;
+    }
+
+    public function cari_selector($selector)
+    {
+        return $this-&gt;db-&gt;get_where($this-&gt;table, array('selector' =&gt; $selector))-&gt;row();
+    }
+
+    public function hapus($id)
+    {
+        $this-&gt;db-&gt;delete($this-&gt;table, array('id' =&gt; (int) $id));
+    }
+
+    public function hapus_selector($selector)
+    {
+        $this-&gt;db-&gt;delete($this-&gt;table, array('selector' =&gt; $selector));
+    }
+
+    /** Cabut semua perangkat yang diingat milik seorang pengguna */
+    public function hapus_milik($id_user)
+    {
+        $this-&gt;db-&gt;delete($this-&gt;table, array('id_user' =&gt; (int) $id_user));
+        return $this-&gt;db-&gt;affected_rows();
+    }
+
+    public function jumlah_aktif($id_user)
+    {
+        return $this-&gt;db-&gt;where('id_user', (int) $id_user)-&gt;where('expires_at &gt;', date('Y-m-d H:i:s'))
+            -&gt;count_all_results($this-&gt;table);
+    }
+
+    public function bersihkan_kedaluwarsa()
+    {
+        $this-&gt;db-&gt;delete($this-&gt;table, array('expires_at &lt;' =&gt; date('Y-m-d H:i:s')));
+    }
+}</code></pre>
+
+<h2>Langkah 4. Library Autentikasi &amp; Controller Auth</h2>
+<p>Session hanya menyimpan <code>id_user</code>; data pengguna dan perannya dibaca ulang dari database setiap request, sehingga perubahan peran oleh admin langsung berlaku.</p>
+<h3>libraries/Autentikasi.php</h3>
+<pre style="background:#1e1e1e;color:#d4d4d4;padding:12px;border-radius:6px;overflow-x:auto;font-size:13px;"><code>&lt;?php
+defined('BASEPATH') OR exit('No direct script access allowed');
+
+/**
+ * Library autentikasi ShopEase.
+ * Session hanya menyimpan id_user; data pengguna (termasuk peran) dibaca ulang
+ * dari database setiap request, sehingga perubahan peran oleh admin atau akun
+ * yang dihapus langsung berlaku tanpa menunggu pengguna logout.
+ */
+class Autentikasi
+{
+    const COOKIE = 'shopease_ingat';
+
+    /** hash palsu agar waktu proses email tak terdaftar sama dengan password salah */
+    const HASH_PEMBANDING = '$2y$12$nBPu69f4NoWHzA0bQJRrmuOcWJxw5PUR8RQuUefrXyevXIpCg8AIW';
+
+    /** @var CI_Controller */
+    protected $CI;
+    protected $user = FALSE;   // FALSE = belum dibaca, NULL = tamu
+
+    public function __construct()
+    {
+        $this-&gt;CI =&amp; get_instance();
+        $this-&gt;CI-&gt;config-&gt;load('akses');
+        $this-&gt;CI-&gt;load-&gt;model(array('user_model', 'remember_token_model', 'login_attempt_model'));
+        $this-&gt;CI-&gt;load-&gt;helper('cookie');
+        // masuk otomatis dari cookie "Ingat saya" bila sesi sudah habis
+        $this-&gt;_masuk_dari_cookie();
+    }
+
+    /* ---------------- status ---------------- */
+
+    public function cek()
+    {
+        return $this-&gt;user() !== NULL;
+    }
+
+    /** @return object|null pengguna yang sedang login (tanpa password) */
+    public function user()
+    {
+        if ($this-&gt;user === FALSE)
+        {
+            $id = $this-&gt;CI-&gt;session-&gt;userdata('id_user');
+            $u = $id ? $this-&gt;CI-&gt;user_model-&gt;cari($id) : NULL;
+            if ($id &amp;&amp; ! $u)
+            {
+                // akun sudah dihapus admin: bersihkan sesi
+                $this-&gt;CI-&gt;session-&gt;unset_userdata(array('id_user', 'masuk_pada'));
+            }
+            if ($u) unset($u-&gt;password);
+            $this-&gt;user = $u ?: NULL;
+        }
+        return $this-&gt;user;
+    }
+
+    public function peran()
+    {
+        return $this-&gt;cek() ? $this-&gt;user()-&gt;role : NULL;
+    }
+
+    public function beranda_peran($peran = NULL)
+    {
+        $map = $this-&gt;CI-&gt;config-&gt;item('beranda_peran');
+        $peran = $peran ?: $this-&gt;peran();
+        return isset($map[$peran]) ? $map[$peran] : '';
+    }
+
+    /* ---------------- login / logout ---------------- */
+
+    /**
+     * Periksa email &amp; password.
+     * @return object|false user bila cocok
+     */
+    public function verifikasi($email, $password)
+    {
+        $user = $this-&gt;CI-&gt;user_model-&gt;cari_by_email($email);
+        // password_verify tetap dijalankan walau email tidak ada, agar lama proses sama
+        $cocok = password_verify((string) $password, $user ? $user-&gt;password : self::HASH_PEMBANDING);
+        return ($user &amp;&amp; $cocok) ? $user : FALSE;
+    }
+
+    public function masuk($user, $ingat = FALSE)
+    {
+        // ID sesi diganti setelah login untuk mencegah session fixation
+        $this-&gt;CI-&gt;session-&gt;sess_regenerate(TRUE);
+        $this-&gt;CI-&gt;session-&gt;set_userdata(array('id_user' =&gt; (int) $user-&gt;id_user, 'masuk_pada' =&gt; time()));
+        $this-&gt;CI-&gt;user_model-&gt;catat_login($user-&gt;id_user);
+        $this-&gt;user = FALSE;
+
+        if ($ingat)
+        {
+            $hari = (int) $this-&gt;CI-&gt;config-&gt;item('ingat_saya_hari');
+            $this-&gt;_pasang_cookie($this-&gt;CI-&gt;remember_token_model-&gt;buat($user-&gt;id_user, $hari), $hari * 86400);
+        }
+    }
+
+    public function keluar()
+    {
+        $selector = $this-&gt;_selector_cookie();
+        if ($selector) $this-&gt;CI-&gt;remember_token_model-&gt;hapus_selector($selector);
+        delete_cookie(self::COOKIE);
+        $this-&gt;CI-&gt;session-&gt;unset_userdata(array('id_user', 'masuk_pada'));
+        $this-&gt;CI-&gt;session-&gt;sess_regenerate(TRUE);
+        $this-&gt;user = NULL;
+    }
+
+    /** Lupakan semua perangkat (hapus semua token Ingat saya milik pengguna) */
+    public function lupakan_semua_perangkat($id_user)
+    {
+        delete_cookie(self::COOKIE);
+        return $this-&gt;CI-&gt;remember_token_model-&gt;hapus_milik($id_user);
+    }
+
+    public function diingat()
+    {
+        return $this-&gt;_selector_cookie() !== NULL;
+    }
+
+    /* ---------------- pembatasan percobaan ---------------- */
+
+    public function terkunci_sampai($email)
+    {
+        $c = $this-&gt;CI-&gt;config;
+        return $this-&gt;CI-&gt;login_attempt_model-&gt;terkunci_sampai($email, $this-&gt;CI-&gt;input-&gt;ip_address(),
+            $c-&gt;item('login_batas_gagal'), $c-&gt;item('login_jendela_menit'), $c-&gt;item('login_kunci_menit'));
+    }
+
+    public function catat_percobaan($email, $berhasil)
+    {
+        $this-&gt;CI-&gt;login_attempt_model-&gt;catat($email, $this-&gt;CI-&gt;input-&gt;ip_address(), $berhasil, $this-&gt;CI-&gt;input-&gt;user_agent());
+    }
+
+    public function sisa_percobaan($email)
+    {
+        return $this-&gt;CI-&gt;login_attempt_model-&gt;sisa_percobaan($email, $this-&gt;CI-&gt;input-&gt;ip_address(),
+            $this-&gt;CI-&gt;config-&gt;item('login_batas_gagal'), $this-&gt;CI-&gt;config-&gt;item('login_jendela_menit'));
+    }
+
+    /* ---------------- internal: cookie Ingat saya ---------------- */
+
+    private function _masuk_dari_cookie()
+    {
+        if ($this-&gt;CI-&gt;session-&gt;userdata('id_user')) return;
+
+        $nilai = (string) get_cookie(self::COOKIE);
+        if ( ! preg_match('/^([a-f0-9]{24}):([a-f0-9]{64})$/', $nilai, $m)) return;
+
+        $token = $this-&gt;CI-&gt;remember_token_model-&gt;cari_selector($m[1]);
+        $sah = $token &amp;&amp; $token-&gt;expires_at &gt; date('Y-m-d H:i:s')
+            &amp;&amp; hash_equals($token-&gt;validator_hash, hash('sha256', $m[2]));
+
+        if ( ! $sah)
+        {
+            // selector cocok tetapi validator salah = kemungkinan cookie dicuri: cabut semua token pengguna itu
+            if ($token) $this-&gt;CI-&gt;remember_token_model-&gt;hapus_milik($token-&gt;id_user);
+            delete_cookie(self::COOKIE);
+            return;
+        }
+
+        $user = $this-&gt;CI-&gt;user_model-&gt;cari($token-&gt;id_user);
+        if ( ! $user) return;
+
+        // token sekali pakai: hapus yang lama, masuk() akan membuat token baru (rotasi)
+        $this-&gt;CI-&gt;remember_token_model-&gt;hapus($token-&gt;id);
+        $this-&gt;masuk($user, TRUE);
+        $this-&gt;CI-&gt;session-&gt;set_flashdata('info', 'Selamat datang kembali, '.$user-&gt;name.'. Kamu masuk otomatis lewat "Ingat saya".');
+    }
+
+    private function _selector_cookie()
+    {
+        $nilai = (string) get_cookie(self::COOKIE);
+        return preg_match('/^([a-f0-9]{24}):/', $nilai, $m) ? $m[1] : NULL;
+    }
+
+    private function _pasang_cookie($nilai, $detik)
+    {
+        $this-&gt;CI-&gt;input-&gt;set_cookie(array(
+            'name'     =&gt; self::COOKIE,
+            'value'    =&gt; $nilai,
+            'expire'   =&gt; $detik,
+            'httponly' =&gt; TRUE,
+        ));
+    }
+}</code></pre>
+<h3>controllers/Auth.php — register, login, logout</h3>
+<pre style="background:#1e1e1e;color:#d4d4d4;padding:12px;border-radius:6px;overflow-x:auto;font-size:13px;"><code>&lt;?php
+defined('BASEPATH') OR exit('No direct script access allowed');
+
+/**
+ * Registrasi, login, dan logout.
+ *   /register  GET form, POST simpan akun baru (peran selalu customer)
+ *   /login     GET form, POST periksa email &amp; password
+ *   /logout    POST saja (memakai token CSRF)
+ * Pengguna yang sudah login tidak bisa membuka /login dan /register (diatur hook Penjaga_akses).
+ */
+class Auth extends MY_Controller
+{
+    public function register()
+    {
+        if ($this-&gt;input-&gt;method() === 'post')
+        {
+            $this-&gt;form_validation-&gt;set_rules('name', 'Nama', 'trim|required|min_length[3]|max_length[100]');
+            $this-&gt;form_validation-&gt;set_rules('email', 'Email', 'trim|required|valid_email|max_length[100]|is_unique[users.email]',
+                array('is_unique' =&gt; 'Email ini sudah terdaftar. Silakan masuk.'));
+            // aturan berbentuk array karena regex mengandung "|" (string aturan CI3 dipecah dengan "|")
+            $this-&gt;form_validation-&gt;set_rules('phone', 'Nomor HP', array('trim', 'regex_match[/^(\+62|62|0)8[0-9]{7,11}$/]'),
+                array('regex_match' =&gt; 'Nomor HP harus diawali 08 atau +628, 10–14 digit.'));
+            $this-&gt;form_validation-&gt;set_rules('address', 'Alamat', 'trim|max_length[300]');
+            $this-&gt;form_validation-&gt;set_rules('password', 'Password', 'required|min_length[8]|max_length[72]|callback__password_kuat');
+            $this-&gt;form_validation-&gt;set_rules('password_confirm', 'Ulangi password', 'required|matches[password]',
+                array('matches' =&gt; 'Ulangi password tidak sama.'));
+
+            if ($this-&gt;form_validation-&gt;run())
+            {
+                $id = $this-&gt;user_model-&gt;daftar(array(
+                    'name'     =&gt; $this-&gt;input-&gt;post('name', TRUE),
+                    'email'    =&gt; $this-&gt;input-&gt;post('email', TRUE),
+                    'phone'    =&gt; (string) $this-&gt;input-&gt;post('phone', TRUE),
+                    'address'  =&gt; (string) $this-&gt;input-&gt;post('address', TRUE),
+                    'password' =&gt; $this-&gt;input-&gt;post('password'),
+                ));
+                // akun baru langsung masuk, tidak perlu login ulang
+                $this-&gt;auth-&gt;masuk($this-&gt;user_model-&gt;cari($id));
+                $this-&gt;session-&gt;set_flashdata('sukses', 'Akun berhasil dibuat. Selamat datang di ShopEase!');
+                redirect('akun');
+            }
+        }
+
+        $this-&gt;render('auth/register', array('title' =&gt; 'Daftar — ShopEase'));
+    }
+
+    public function login()
+    {
+        $email = '';
+        $galat = NULL;
+
+        if ($this-&gt;input-&gt;method() === 'post')
+        {
+            $email    = strtolower(trim((string) $this-&gt;input-&gt;post('email', TRUE)));
+            $password = (string) $this-&gt;input-&gt;post('password');
+
+            $this-&gt;form_validation-&gt;set_rules('email', 'Email', 'trim|required|valid_email');
+            $this-&gt;form_validation-&gt;set_rules('password', 'Password', 'required');
+
+            if ($this-&gt;form_validation-&gt;run())
+            {
+                $kunci = $this-&gt;auth-&gt;terkunci_sampai($email);
+                if ($kunci)
+                {
+                    // percobaan saat terkunci tidak dicatat agar tidak memperpanjang kuncian
+                    $galat = 'Terlalu banyak percobaan gagal untuk email ini. Coba lagi pukul '.date('H:i', $kunci).' ('.max(1, ceil(($kunci - time()) / 60)).' menit lagi).';
+                }
+                elseif ($user = $this-&gt;auth-&gt;verifikasi($email, $password))
+                {
+                    $this-&gt;auth-&gt;catat_percobaan($email, TRUE);
+                    $this-&gt;auth-&gt;masuk($user, (bool) $this-&gt;input-&gt;post('ingat'));
+
+                    $tujuan = $this-&gt;session-&gt;userdata('tujuan_login');
+                    $this-&gt;session-&gt;unset_userdata('tujuan_login');
+                    $this-&gt;session-&gt;set_flashdata('sukses', 'Halo, '.$user-&gt;name.'. Kamu berhasil masuk.');
+                    redirect($tujuan ?: $this-&gt;auth-&gt;beranda_peran($user-&gt;role));
+                }
+                else
+                {
+                    $this-&gt;auth-&gt;catat_percobaan($email, FALSE);
+                    $sisa = $this-&gt;auth-&gt;sisa_percobaan($email);
+                    // pesan sama untuk email tak terdaftar &amp; password salah
+                    $galat = 'Email atau password salah.'.($sisa &gt; 0 &amp;&amp; $sisa &lt;= 3 ? ' Sisa '.$sisa.' percobaan sebelum dikunci sementara.' : '');
+                    if ($sisa === 0) $galat = 'Email atau password salah. Login untuk email ini dikunci '.$this-&gt;config-&gt;item('login_kunci_menit').' menit.';
+                }
+            }
+        }
+
+        $this-&gt;render('auth/login', array(
+            'title' =&gt; 'Masuk — ShopEase',
+            'email' =&gt; $email ?: (string) $this-&gt;input-&gt;get('email', TRUE),
+            'galat' =&gt; $galat,
+        ));
+    }
+
+    public function logout()
+    {
+        if ($this-&gt;input-&gt;method() !== 'post')
+        {
+            show_error('Logout harus lewat tombol Keluar.', 405);
+        }
+        $this-&gt;auth-&gt;keluar();
+        $this-&gt;session-&gt;set_flashdata('sukses', 'Kamu sudah keluar. Sampai jumpa lagi.');
+        redirect('login');
+    }
+
+    /** Password wajib mengandung huruf dan angka */
+    public function _password_kuat($pw)
+    {
+        if ( ! preg_match('/[A-Za-z]/', $pw) || ! preg_match('/[0-9]/', $pw))
+        {
+            $this-&gt;form_validation-&gt;set_message('_password_kuat', 'Password harus berisi huruf dan angka.');
+            return FALSE;
+        }
+        return TRUE;
+    }
+}</code></pre>
+<p><b>Catatan:</b> di CodeIgniter 3, string aturan validasi dipecah dengan tanda <code>|</code>, sehingga regex nomor HP <code>(\+62|62|0)</code> ikut terpotong. Solusinya, aturan ditulis sebagai array. Bug ini sempat muncul saat pengujian lalu diperbaiki.</p>
+
+<h2>Langkah 5. Route</h2>
+<pre style="background:#1e1e1e;color:#d4d4d4;padding:12px;border-radius:6px;overflow-x:auto;font-size:13px;"><code>$route['register'] = 'auth/register';   // GET = form, POST = simpan
+$route['login']    = 'auth/login';      // GET = form, POST = periksa
+$route['logout']   = 'auth/logout';     // hanya POST</code></pre>
+<p>Halaman <code>/akun</code>, <code>/operator</code>, dan <code>/admin</code> memakai routing otomatis CI3. Penjagaannya ada di peta akses, bukan di route.</p>
+
+<h2>Langkah 6. Hook Penjaga Akses (pengganti Filter CI4)</h2>
+<pre style="background:#1e1e1e;color:#d4d4d4;padding:12px;border-radius:6px;overflow-x:auto;font-size:13px;"><code>// config/hooks.php
+$hook['post_controller_constructor'][] = array(
+    'class'    =&gt; 'Penjaga_akses',
+    'function' =&gt; 'periksa',
+    'filename' =&gt; 'Penjaga_akses.php',
+    'filepath' =&gt; 'hooks',
+);</code></pre>
+<h3>hooks/Penjaga_akses.php</h3>
+<pre style="background:#1e1e1e;color:#d4d4d4;padding:12px;border-radius:6px;overflow-x:auto;font-size:13px;"><code>&lt;?php
+defined('BASEPATH') OR exit('No direct script access allowed');
+
+/**
+ * Hook penjaga akses (pengganti Filter CI4 di CodeIgniter 3).
+ * Dijalankan pada titik post_controller_constructor, yaitu setelah controller
+ * dibuat dan sebelum method-nya dipanggil, berdasarkan peta config/akses.php.
+ */
+class Penjaga_akses
+{
+    public function periksa()
+    {
+        $CI =&amp; get_instance();
+        $segmen = (string) $CI-&gt;uri-&gt;segment(1);
+
+        // 1) halaman khusus tamu: yang sudah login dialihkan ke beranda perannya
+        if (in_array($segmen, $CI-&gt;config-&gt;item('khusus_tamu'), TRUE) &amp;&amp; $CI-&gt;auth-&gt;cek())
+        {
+            redirect($CI-&gt;auth-&gt;beranda_peran());
+        }
+
+        $aturan = $CI-&gt;config-&gt;item('akses');
+        if ( ! isset($aturan[$segmen]))
+        {
+            return; // halaman publik
+        }
+
+        // 2) wajib login
+        if ( ! $CI-&gt;auth-&gt;cek())
+        {
+            $tujuan = uri_string().($CI-&gt;input-&gt;server('QUERY_STRING') ? '?'.$CI-&gt;input-&gt;server('QUERY_STRING') : '');
+            $CI-&gt;session-&gt;set_userdata('tujuan_login', $tujuan);
+            $CI-&gt;session-&gt;set_flashdata('info', 'Masuk dulu untuk membuka halaman itu.');
+            redirect('login');
+        }
+
+        // 3) wajib peran tertentu
+        $izin = $aturan[$segmen];
+        if (is_array($izin) &amp;&amp; ! in_array($CI-&gt;auth-&gt;peran(), $izin, TRUE))
+        {
+            $this-&gt;_tolak($CI, $izin);
+        }
+    }
+
+    /** Tampilkan halaman 403 lalu hentikan request */
+    private function _tolak($CI, array $izin)
+    {
+        $CI-&gt;output-&gt;set_status_header(403);
+        $data = array(
+            'title'   =&gt; 'Akses ditolak — ShopEase',
+            'izin'    =&gt; $izin,
+            'halaman' =&gt; uri_string(),
+        );
+        $data['content'] = $CI-&gt;load-&gt;view('halaman/ditolak', $data, TRUE);
+        $CI-&gt;load-&gt;view('layouts/main', $data);
+        $CI-&gt;output-&gt;_display();
+        exit;
+    }
+}</code></pre>
+
+<h2>Langkah 7. Controller &amp; View Halaman Terlindungi</h2>
+<h3>controllers/Admin.php</h3>
+<pre style="background:#1e1e1e;color:#d4d4d4;padding:12px;border-radius:6px;overflow-x:auto;font-size:13px;"><code>&lt;?php
+defined('BASEPATH') OR exit('No direct script access allowed');
+
+/**
+ * Panel admin (dijaga hook: 'admin' =&gt; array('admin')).
+ *   /admin                     ringkasan pengguna &amp; aktivitas login
+ *   /admin/pengguna            kelola pengguna (cari, filter peran)
+ *   /admin/peran/{id}          (POST) ubah peran
+ *   /admin/hapus/{id}          (POST) hapus pengguna
+ */
+class Admin extends MY_Controller
+{
+    public function index()
+    {
+        $this-&gt;render('admin/index', array(
+            'title'      =&gt; 'Dashboard admin — ShopEase',
+            'per_peran'  =&gt; $this-&gt;user_model-&gt;hitung_per_peran(),
+            'baru_7hari' =&gt; $this-&gt;user_model-&gt;daftar_sejak(date('Y-m-d H:i:s', strtotime('-7 days'))),
+            'login24'    =&gt; $this-&gt;login_attempt_model-&gt;ringkasan_24jam(),
+            'terbaru'    =&gt; $this-&gt;user_model-&gt;daftar_pengguna(NULL, NULL, 5),
+            'aktivitas'  =&gt; $this-&gt;login_attempt_model-&gt;terbaru(8),
+        ));
+    }
+
+    public function pengguna()
+    {
+        $peran = $this-&gt;input-&gt;get('peran', TRUE);
+        $q = trim((string) $this-&gt;input-&gt;get('q', TRUE));
+        $this-&gt;render('admin/pengguna', array(
+            'title'     =&gt; 'Kelola pengguna — ShopEase',
+            'daftar'    =&gt; $this-&gt;user_model-&gt;daftar_pengguna($peran, $q),
+            'per_peran' =&gt; $this-&gt;user_model-&gt;hitung_per_peran(),
+            'peran'     =&gt; $peran,
+            'q'         =&gt; $q,
+        ));
+    }
+
+    public function peran($id = NULL)
+    {
+        $this-&gt;_wajib_post();
+        $u = $this-&gt;user_model-&gt;cari($id);
+        $baru = $this-&gt;input-&gt;post('role');
+
+        if ( ! $u || ! in_array($baru, User_model::PERAN, TRUE))
+        {
+            $this-&gt;session-&gt;set_flashdata('galat', 'Data peran tidak valid.');
+        }
+        elseif ((int) $u-&gt;id_user === (int) $this-&gt;auth-&gt;user()-&gt;id_user)
+        {
+            // mencegah admin terakhir mengunci dirinya sendiri dari panel admin
+            $this-&gt;session-&gt;set_flashdata('galat', 'Kamu tidak bisa mengubah peran akunmu sendiri.');
+        }
+        else
+        {
+            $this-&gt;user_model-&gt;ubah_peran($u-&gt;id_user, $baru);
+            $this-&gt;session-&gt;set_flashdata('sukses', 'Peran '.$u-&gt;name.' diubah menjadi '.$baru.'. Berlaku di request berikutnya tanpa perlu login ulang.');
+        }
+        redirect('admin/pengguna'.$this-&gt;_kembali_query());
+    }
+
+    public function hapus($id = NULL)
+    {
+        $this-&gt;_wajib_post();
+        $u = $this-&gt;user_model-&gt;cari($id);
+        if ( ! $u)
+        {
+            $this-&gt;session-&gt;set_flashdata('galat', 'Pengguna tidak ditemukan.');
+        }
+        elseif ((int) $u-&gt;id_user === (int) $this-&gt;auth-&gt;user()-&gt;id_user)
+        {
+            $this-&gt;session-&gt;set_flashdata('galat', 'Kamu tidak bisa menghapus akunmu sendiri.');
+        }
+        else
+        {
+            $this-&gt;user_model-&gt;hapus($u-&gt;id_user);   // token Ingat saya ikut terhapus (ON DELETE CASCADE)
+            $this-&gt;session-&gt;set_flashdata('sukses', 'Akun '.$u-&gt;name.' dihapus.');
+        }
+        redirect('admin/pengguna'.$this-&gt;_kembali_query());
+    }
+
+    private function _kembali_query()
+    {
+        $q = (string) $this-&gt;input-&gt;post('kembali');
+        return $q !== '' &amp;&amp; $q[0] === '?' ? $q : '';
+    }
+
+    private function _wajib_post()
+    {
+        if ($this-&gt;input-&gt;method() !== 'post') show_error('Metode tidak diizinkan.', 405);
+    }
+}</code></pre>
+<h3>controllers/Akun.php</h3>
+<pre style="background:#1e1e1e;color:#d4d4d4;padding:12px;border-radius:6px;overflow-x:auto;font-size:13px;"><code>&lt;?php
+defined('BASEPATH') OR exit('No direct script access allowed');
+
+/**
+ * Halaman akun untuk semua peran yang sudah login (dijaga hook: 'akun' =&gt; 'login').
+ *   /akun                 profil + peta akses
+ *   /akun/simpan          (POST) ubah nama, HP, alamat
+ *   /akun/password        (POST) ganti password
+ *   /akun/lupakan         (POST) cabut semua perangkat "Ingat saya"
+ */
+class Akun extends MY_Controller
+{
+    public function index()
+    {
+        $this-&gt;config-&gt;load('akses');
+        $this-&gt;render('akun/index', array(
+            'title'     =&gt; 'Akun saya — ShopEase',
+            'u'         =&gt; $this-&gt;auth-&gt;user(),
+            'perangkat' =&gt; $this-&gt;remember_token_model-&gt;jumlah_aktif($this-&gt;auth-&gt;user()-&gt;id_user),
+            'diingat'   =&gt; $this-&gt;auth-&gt;diingat(),
+            'aturan'    =&gt; $this-&gt;config-&gt;item('akses'),
+        ));
+    }
+
+    public function simpan()
+    {
+        $this-&gt;_wajib_post();
+        $this-&gt;form_validation-&gt;set_rules('name', 'Nama', 'trim|required|min_length[3]|max_length[100]');
+        $this-&gt;form_validation-&gt;set_rules('phone', 'Nomor HP', array('trim', 'regex_match[/^(\+62|62|0)8[0-9]{7,11}$/]'),
+            array('regex_match' =&gt; 'Nomor HP harus diawali 08 atau +628, 10–14 digit.'));
+        $this-&gt;form_validation-&gt;set_rules('address', 'Alamat', 'trim|max_length[300]');
+
+        if ( ! $this-&gt;form_validation-&gt;run())
+        {
+            return $this-&gt;index();
+        }
+
+        $phone = (string) $this-&gt;input-&gt;post('phone', TRUE);
+        $address = (string) $this-&gt;input-&gt;post('address', TRUE);
+        $this-&gt;user_model-&gt;ubah_profil($this-&gt;auth-&gt;user()-&gt;id_user, array(
+            'name'    =&gt; $this-&gt;input-&gt;post('name', TRUE),
+            'phone'   =&gt; $phone !== '' ? $phone : NULL,
+            'address' =&gt; $address !== '' ? $address : NULL,
+        ));
+        $this-&gt;session-&gt;set_flashdata('sukses', 'Profil disimpan.');
+        redirect('akun');
+    }
+
+    public function password()
+    {
+        $this-&gt;_wajib_post();
+        $this-&gt;form_validation-&gt;set_rules('password_lama', 'Password lama', 'required|callback__cek_lama');
+        $this-&gt;form_validation-&gt;set_rules('password_baru', 'Password baru', 'required|min_length[8]|max_length[72]|callback__beda_dan_kuat');
+        $this-&gt;form_validation-&gt;set_rules('password_ulang', 'Ulangi password baru', 'required|matches[password_baru]',
+            array('matches' =&gt; 'Ulangi password baru tidak sama.'));
+
+        if ( ! $this-&gt;form_validation-&gt;run())
+        {
+            return $this-&gt;index();
+        }
+
+        $id = $this-&gt;auth-&gt;user()-&gt;id_user;
+        $this-&gt;user_model-&gt;ganti_password($id, $this-&gt;input-&gt;post('password_baru'));
+        // perangkat lain yang diingat ikut dicabut setelah password diganti
+        $dicabut = $this-&gt;auth-&gt;lupakan_semua_perangkat($id);
+        $this-&gt;session-&gt;sess_regenerate(TRUE);
+        $this-&gt;session-&gt;set_flashdata('sukses', 'Password diganti.'.($dicabut ? ' '.$dicabut.' perangkat yang diingat sudah dikeluarkan.' : ''));
+        redirect('akun');
+    }
+
+    public function lupakan()
+    {
+        $this-&gt;_wajib_post();
+        $n = $this-&gt;auth-&gt;lupakan_semua_perangkat($this-&gt;auth-&gt;user()-&gt;id_user);
+        $this-&gt;session-&gt;set_flashdata('sukses', $n ? $n.' perangkat tidak lagi diingat.' : 'Tidak ada perangkat yang diingat.');
+        redirect('akun');
+    }
+
+    public function _cek_lama($pw)
+    {
+        $u = $this-&gt;user_model-&gt;cari($this-&gt;auth-&gt;user()-&gt;id_user);
+        if ( ! password_verify((string) $pw, $u-&gt;password))
+        {
+            $this-&gt;form_validation-&gt;set_message('_cek_lama', 'Password lama salah.');
+            return FALSE;
+        }
+        return TRUE;
+    }
+
+    public function _beda_dan_kuat($pw)
+    {
+        if ($pw === $this-&gt;input-&gt;post('password_lama'))
+        {
+            $this-&gt;form_validation-&gt;set_message('_beda_dan_kuat', 'Password baru harus berbeda dari password lama.');
+            return FALSE;
+        }
+        if ( ! preg_match('/[A-Za-z]/', $pw) || ! preg_match('/[0-9]/', $pw))
+        {
+            $this-&gt;form_validation-&gt;set_message('_beda_dan_kuat', 'Password harus berisi huruf dan angka.');
+            return FALSE;
+        }
+        return TRUE;
+    }
+
+    private function _wajib_post()
+    {
+        if ($this-&gt;input-&gt;method() !== 'post') redirect('akun');
+    }
+}</code></pre>
+<h3>views/auth/login.php</h3>
+<pre style="background:#1e1e1e;color:#d4d4d4;padding:12px;border-radius:6px;overflow-x:auto;font-size:13px;"><code>&lt;div class="container auth-wrap"&gt;
+    &lt;div class="auth-grid"&gt;
+        &lt;div class="auth-form"&gt;
+            &lt;h1&gt;Masuk&lt;/h1&gt;
+            &lt;p class="text-steel"&gt;Belum punya akun? &lt;a href="&lt;?= site_url('register') ?&gt;"&gt;Daftar gratis&lt;/a&gt;&lt;/p&gt;
+
+            &lt;?php if ($galat): ?&gt;
+                &lt;div class="pesan pesan-galat" role="alert"&gt;&lt;?= html_escape($galat) ?&gt;&lt;/div&gt;
+            &lt;?php endif; ?&gt;
+
+            &lt;?= form_open('login', array('novalidate' =&gt; 'novalidate')) ?&gt;
+                &lt;div class="mb-3"&gt;
+                    &lt;label class="form-label" for="email"&gt;Email&lt;/label&gt;
+                    &lt;input class="form-control&lt;?= form_error('email') ? ' is-invalid' : '' ?&gt;" type="email" id="email" name="email"
+                        value="&lt;?= html_escape($email) ?&gt;" autocomplete="username" &lt;?= $email ? '' : 'autofocus' ?&gt;&gt;
+                    &lt;?= form_error('email', '&lt;div class="invalid-feedback"&gt;', '&lt;/div&gt;') ?&gt;
+                &lt;/div&gt;
+                &lt;div class="mb-3"&gt;
+                    &lt;label class="form-label" for="password"&gt;Password&lt;/label&gt;
+                    &lt;div class="input-sandi"&gt;
+                        &lt;input class="form-control&lt;?= form_error('password') ? ' is-invalid' : '' ?&gt;" type="password" id="password" name="password"
+                            autocomplete="current-password" &lt;?= $email ? 'autofocus' : '' ?&gt;&gt;
+                        &lt;button type="button" class="lihat" data-lihat="password" aria-pressed="false"&gt;Lihat&lt;/button&gt;
+                    &lt;/div&gt;
+                    &lt;?= form_error('password', '&lt;div class="invalid-feedback d-block"&gt;', '&lt;/div&gt;') ?&gt;
+                &lt;/div&gt;
+                &lt;div class="form-check mb-4"&gt;
+                    &lt;input class="form-check-input" type="checkbox" value="1" id="ingat" name="ingat" &lt;?= $this-&gt;input-&gt;post('ingat') ? 'checked' : '' ?&gt;&gt;
+                    &lt;label class="form-check-label" for="ingat"&gt;Ingat saya di perangkat ini selama &lt;?= $this-&gt;config-&gt;item('ingat_saya_hari') ?&gt; hari&lt;/label&gt;
+                &lt;/div&gt;
+                &lt;button type="submit" class="btn btn-se w-100 py-2"&gt;Masuk&lt;/button&gt;
+            &lt;?= form_close() ?&gt;
+
+            &lt;details class="akun-demo"&gt;
+                &lt;summary&gt;Akun contoh untuk mencoba&lt;/summary&gt;
+                &lt;table class="table table-sm mb-0 mt-2"&gt;
+                    &lt;tr&gt;&lt;td&gt;Admin&lt;/td&gt;&lt;td&gt;&lt;code&gt;admin@shopease.test&lt;/code&gt;&lt;/td&gt;&lt;/tr&gt;
+                    &lt;tr&gt;&lt;td&gt;Operator&lt;/td&gt;&lt;td&gt;&lt;code&gt;operator@shopease.test&lt;/code&gt;&lt;/td&gt;&lt;/tr&gt;
+                    &lt;tr&gt;&lt;td&gt;Customer&lt;/td&gt;&lt;td&gt;&lt;code&gt;raka@shopease.test&lt;/code&gt;&lt;/td&gt;&lt;/tr&gt;
+                &lt;/table&gt;
+                &lt;p class="small text-steel mt-2 mb-0"&gt;Password semua akun: &lt;code&gt;shopease123&lt;/code&gt;&lt;/p&gt;
+            &lt;/details&gt;
+        &lt;/div&gt;
+        &lt;?php $this-&gt;load-&gt;view('auth/_panel', array('mode' =&gt; 'login')); ?&gt;
+    &lt;/div&gt;
+&lt;/div&gt;</code></pre>
+<h3>views/halaman/ditolak.php — halaman 403</h3>
+<pre style="background:#1e1e1e;color:#d4d4d4;padding:12px;border-radius:6px;overflow-x:auto;font-size:13px;"><code>&lt;?php
+// Ditampilkan oleh hook Penjaga_akses dengan status 403. Variabel: $izin, $halaman, $pengguna
+$nama = array('customer' =&gt; 'customer', 'operator' =&gt; 'operator', 'admin' =&gt; 'admin');
+$untuk = implode(' dan ', array_map(function ($r) use ($nama) { return $nama[$r]; }, $izin));
+?&gt;
+&lt;div class="container page-head pb-5"&gt;
+    &lt;div class="row g-5 align-items-center"&gt;
+        &lt;div class="col-lg-7"&gt;
+            &lt;p class="display-font fw-bold" style="font-size:5rem;line-height:1;color:var(--rail)"&gt;403&lt;/p&gt;
+            &lt;h1 style="font-size:clamp(2rem,3.6vw,2.6rem)"&gt;Halaman ini khusus &lt;?= $untuk ?&gt;&lt;/h1&gt;
+            &lt;p class="text-steel measure"&gt;Kamu masuk sebagai &lt;b&gt;&lt;?= html_escape($pengguna-&gt;name) ?&gt;&lt;/b&gt; dengan peran &lt;?= badge_peran($pengguna-&gt;role) ?&gt;, jadi &lt;code&gt;/&lt;?= html_escape($halaman) ?&gt;&lt;/code&gt; tidak bisa dibuka. Kalau kamu staf toko, minta admin mengubah peran akunmu.&lt;/p&gt;
+            &lt;a class="btn btn-se mt-2" href="&lt;?= site_url($this-&gt;auth-&gt;beranda_peran()) ?&gt;"&gt;Ke halaman saya&lt;/a&gt;
+            &lt;a class="btn btn-se btn-se-line mt-2" href="&lt;?= base_url() ?&gt;"&gt;Ke beranda toko&lt;/a&gt;
+        &lt;/div&gt;
+        &lt;div class="col-lg-5"&gt;
+            &lt;div class="kotak"&gt;
+                &lt;h2 class="h6 mb-3"&gt;Siapa boleh membuka apa&lt;/h2&gt;
+                &lt;table class="table table-sm mb-0"&gt;
+                    &lt;thead&gt;&lt;tr&gt;&lt;th&gt;Halaman&lt;/th&gt;&lt;th&gt;Peran&lt;/th&gt;&lt;/tr&gt;&lt;/thead&gt;
+                    &lt;tbody&gt;
+                        &lt;tr&gt;&lt;td&gt;/akun&lt;/td&gt;&lt;td&gt;semua yang sudah masuk&lt;/td&gt;&lt;/tr&gt;
+                        &lt;tr&gt;&lt;td&gt;/operator&lt;/td&gt;&lt;td&gt;operator, admin&lt;/td&gt;&lt;/tr&gt;
+                        &lt;tr&gt;&lt;td&gt;/admin&lt;/td&gt;&lt;td&gt;admin&lt;/td&gt;&lt;/tr&gt;
+                    &lt;/tbody&gt;
+                &lt;/table&gt;
+            &lt;/div&gt;
+        &lt;/div&gt;
+    &lt;/div&gt;
+&lt;/div&gt;</code></pre>
+
+<h2>Hasil Pengujian</h2>
+<p>Pengujian dijalankan otomatis dengan Playwright di browser Edge. <b>23 dari 23 pemeriksaan lulus</b>, antara lain:</p>
+<ul>
+<li>POST <code>/logout</code> tanpa token CSRF ditolak 403.</li>
+<li>Registrasi dengan email terdaftar atau password tanpa angka ditolak dengan pesan per kolom; registrasi valid langsung masuk ke <code>/akun</code>.</li>
+<li>Customer membuka <code>/admin</code> dan <code>/operator</code> mendapat 403; yang sudah login tidak bisa membuka <code>/login</code>.</li>
+<li>5 kali password salah mengunci login, password benar tetap ditolak selama terkunci, email lain tidak ikut terkunci.</li>
+<li>Tamu yang membuka <code>/admin/pengguna</code> dikembalikan ke halaman itu setelah login sebagai admin.</li>
+<li>Admin mengubah peran Dewi menjadi operator; Dewi diarahkan ke <code>/operator</code> dan ditolak di <code>/admin</code>.</li>
+<li>"Ingat saya": setelah sesi dihapus pengguna masuk otomatis, cookie dirotasi, dan cookie lama ditolak.</li>
+<li>Ganti password berhasil dan perangkat yang diingat dikeluarkan.</li>
+</ul>
+<p><i>[Sisipkan gambar: s9-01 sampai s9-21 — masuk, daftar, registrasi gagal, akun customer, 403 customer, menu akun, logout, sisa percobaan, login terkunci, kelola pengguna, dashboard admin, ubah peran, dashboard operator, 403 operator, ingat saya, ganti password gagal/berhasil, tampilan HP, phpMyAdmin users &amp; login_attempts]</i></p>
+
+<h2>Kesimpulan</h2>
+<p>Sistem autentikasi ShopEase menunjukkan bahwa CodeIgniter 3 tetap bisa menerapkan pola yang di CodeIgniter 4 dikerjakan oleh Filter, yaitu dengan <b>hook</b> dan <b>peta akses di file config</b>. Password aman karena di-hash dan diverifikasi dengan <code>password_verify()</code>, sesi dilindungi dengan pergantian ID setelah login dan cookie <code>httponly</code>, dan semua aksi yang mengubah data memakai POST + CSRF. Tabel <code>login_attempts</code> dan <code>remember_tokens</code> membuat batas percobaan login dan fitur "Ingat saya" lebih aman serta bisa diaudit.</p>
+
+</div>

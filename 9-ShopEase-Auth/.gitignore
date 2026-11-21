@@ -1,0 +1,6 @@
+bin/
+obj/
+shopease/application/logs/*.php
+shopease/application/cache/*
+!shopease/application/cache/index.html
+!shopease/application/cache/.htaccess

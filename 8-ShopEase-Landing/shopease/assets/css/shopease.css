@@ -192,7 +192,7 @@ section { padding: 4.5rem 0; }
 .footer-bawah { border-top: 1px solid #34425f; margin-top: 2.5rem; padding-top: 1.2rem; font-size: .85rem; color: #93a1b6; }
 
 /* ---------- halaman lain ---------- */
-.page-head { padding: 2.6rem 0 1.4rem; }
+.page-head { padding-top: 2.6rem; padding-bottom: 1.4rem; }   /* hanya atas-bawah agar padding samping .container tetap ada */
 .breadcrumb-se { font-size: .9rem; color: #5d6b80; margin-bottom: .6rem; }
 .breadcrumb-se a { color: #5d6b80; }
 .detail-foto { border-radius: var(--radius-lg); overflow: hidden; background: #e3e9f0; position: relative; }

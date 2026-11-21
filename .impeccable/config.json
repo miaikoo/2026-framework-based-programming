@@ -1,0 +1,26 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "side-tab",
+        "value": "*",
+        "files": [
+          "8-ShopEase-Landing/shopease/assets/css/shopease.css"
+        ],
+        "createdAt": "2026-11-21T15:11:30.241Z",
+        "reason": "Claude triage: .promo-band::before is a full-width railway-crossing stripe across a full-bleed section, not a side accent on a card"
+      },
+      {
+        "rule": "side-tab",
+        "value": "*",
+        "files": [
+          "9-ShopEase-Auth/shopease/assets/css/shopease.css"
+        ],
+        "createdAt": "2026-11-21T15:11:30.683Z",
+        "reason": "Claude triage: .promo-band::before is a full-width railway-crossing stripe across a full-bleed section, not a side accent on a card"
+      }
+    ]
+  }
+}
